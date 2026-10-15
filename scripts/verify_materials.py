@@ -1,0 +1,901 @@
+#!/usr/bin/env python3
+"""Pre-delivery verification for generated software copyright materials.
+
+This is the "final gate" script for the software-copyright-materials skill.
+It runs *after* `build_docx_from_md.py` has produced `正式资料/` and checks
+everything that can be verified mechanically: file completeness, naming and
+page-count consistency, leftover placeholder text, known boilerplate/fabrication
+patterns, screenshot dimensions, application-form field length limits, and
+whether every required human-confirmation gate was actually recorded.
+
+What this script CANNOT check — because it requires reading the target
+project's real source code, watching real screenshots, and judging whether
+prose is genuinely grounded in the project instead of plausible-sounding
+filler — is documented in `references/verification_checklist.md`. Those items
+must be delegated to an independent agent/human, never rubber-stamped by the
+same process that generated the materials.
+
+Only the standard library is used so this script runs even when python-docx
+is not installed; python-docx (already an optional dependency of this skill)
+is used opportunistically to get more precise results (e.g. `doc.paragraphs`
+text extraction and image dimensions via `doc.inline_shapes`), and every
+check that needs it degrades to a WARN (not a crash) when it is unavailable.
+
+Usage:
+    python3 verify_materials.py --workdir 软件著作权申请资料
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+import zipfile
+from pathlib import Path
+from typing import Any
+
+from common import read_json
+
+try:
+    # Reuse the exact 有效字符数 (whitespace/newline-stripped length) algorithm
+    # used elsewhere in this skill, instead of re-implementing it and risking
+    # the two counts drifting apart.
+    from generate_application_info import effective_len
+except Exception:  # pragma: no cover - defensive fallback if import layout changes
+    def effective_len(value: str) -> int:
+        """Fallback copy of generate_application_info.effective_len()'s algorithm.
+
+        Kept in sync manually with that function; only used if the import above
+        fails for some reason (e.g. this script is copied out of scripts/).
+        """
+        return len(str(value or "").replace(" ", "").replace("\n", ""))
+
+try:
+    from docx import Document
+
+    DOCX_AVAILABLE = True
+except Exception:  # pragma: no cover - exercised whenever python-docx is absent
+    DOCX_AVAILABLE = False
+
+try:
+    # 与 build_docx_from_md.py 里图片尺寸约束保持一致：那两个常量就叫
+    # IMAGE_MAX_WIDTH_IN / IMAGE_MAX_HEIGHT_IN，直接复用，避免两处数值不同步。
+    from build_docx_from_md import IMAGE_MAX_WIDTH_IN, IMAGE_MAX_HEIGHT_IN
+except Exception:  # pragma: no cover - defensive fallback if import layout changes
+    IMAGE_MAX_WIDTH_IN = 5.8  # 与 build_docx_from_md.py 里图片尺寸约束保持一致
+    IMAGE_MAX_HEIGHT_IN = 8.8  # 与 build_docx_from_md.py 里图片尺寸约束保持一致
+
+# 图片尺寸比对的容忍误差（英寸），用于吸收 EMU 换算和排版取整带来的微小浮动。
+IMAGE_SIZE_TOLERANCE_IN = 0.05
+
+
+# ---------------------------------------------------------------------------
+# 编造 / 套话黑名单
+#
+# 下列短语曾由生成环节硬编码产出，与具体项目无关，属模板套话；或系模型在操作
+# 手册正文中编造插入的内容。一旦在最终正式文档中再次出现，即表明可能发生同类
+# 回归。检测范围覆盖用户手册 docx 与 正式资料/申请表信息.docx 两份最终材料。
+# 后续遇到同类问题，将新短语加入对应列表即可，无须改动检查逻辑。
+#
+# 无条件黑名单：任何时候出现都判定为问题。
+UNCONDITIONAL_BLACKLIST_PHRASES = [
+    "账号进入、业务创建",
+    "再选择或创建业务对象",
+]
+
+# 申请表套话：下列句式曾由 generate_application_info.py 的 summarize_features() /
+# summarize_business_features() 硬编码产出，用于把不足 500 字的主要功能凑到下限。
+# 其共同特征是把软件名换成任何其他项目后依然成立，且对软件作出「高效完成」「完整的
+# 业务处理能力」一类无依据的评价。这类句子一旦出现在正式材料中，即意味
+# 着材料含编造内容，故与用户手册的固定黑名单同档，命中判 FAIL 而非 WARN。
+APPLICATION_BOILERPLATE_PHRASES = [
+    "面向用户业务场景的综合软件系统",
+    "通过清晰的操作界面和合理的业务流程设计",
+    "帮助用户高效完成日常工作",
+    "提供完整的业务处理能力和结果反馈",
+    "支持用户进行相关数据的查看、录入和管理操作",
+    "功能支持用户完成相关业务操作，并在处理完成后返回对应结果",
+    "系统在关键步骤提供状态反馈和结果展示",
+    "覆盖从信息采集到结果呈现的完整操作链路",
+    "各个功能模块之间通过统一的界面布局和操作规范协同运行",
+    "系统整体设计注重业务完整性和操作连续性",
+    "用户无需复杂培训即可上手使用",
+    "系统还提供了灵活的配置选项",
+    "用户可以根据页面提示逐步完成业务处理",
+]
+
+# 两份材料使用同一套无条件黑名单：上述任一句式无论出现在用户手册还是申请表，
+# 均属编造内容，判据不因所在文件而异。
+ALL_UNCONDITIONAL_PHRASES = UNCONDITIONAL_BLACKLIST_PHRASES + APPLICATION_BOILERPLATE_PHRASES
+
+# 条件黑名单：这几个词本身是常见的软件工程文档术语（总体设计说明书、详细设计
+# 说明书、测试案例……），但不属于固定五章用户手册；出现在手册正文时记录为待修正项。
+CONDITIONAL_BLACKLIST_PHRASES = [
+    "总体设计",
+    "详细设计",
+    "测试案例",
+]
+
+# 截图暂缺时可能保留的占位字样；仅允许用户提供截图或跳过截图两种方式。
+SCREENSHOT_PLACEHOLDER_TERMS = ["截图预留", "截图缺失", "截图无法插入"]
+
+# 申请表信息.docx 的占位残留字样，分两档（STRICT / SOFT），STRICT 档再按检测范围分两组。
+#
+# STRICT-全文 —— 语义上不可能构成真实叙述，出现在任何位置（含 500 至 1300 字的
+# 「软件的主要功能」正文）都表明字段未被真正补全，全文命中即判 FAIL。
+UNCONFIRMED_TERMS_GLOBAL = [
+    "待用户确认",
+    "待补充",
+    "待填写",
+    "某某",
+    "占位符",
+    "此处填写",
+    "请填写",
+]
+
+# STRICT-字段值 —— 这几个词在描述性正文里可能是正当叙述（例如「系统支持任务待完善
+# 状态的标记与筛选」「用户可对未定稿的条目标注为待定」「界面提供占位内容预览」
+# 「支持导入公司名称（全称）」），扫全文必然误伤，故只在短字段的取值范围内检测，
+# 不施加于 FIELD_LENGTH_LIMITS 所列的叙述性字段。
+UNCONFIRMED_TERMS_FIELD_SCOPED = [
+    "待完善",
+    "待定",
+    "占位内容",
+    "公司名称（",
+]
+
+# 兼容旧引用：两组之和即原先的 STRICT 全量词表。
+UNCONFIRMED_TERMS = UNCONFIRMED_TERMS_GLOBAL + UNCONFIRMED_TERMS_FIELD_SCOPED
+
+# STRICT 档中需按正则判定的字样：全角 ×× 占位、TBD、placeholder。
+# 采用正则而非子串，以免 TBD、demo 一类短词误命中更长的正当词汇。
+PLACEHOLDER_PATTERNS_STRICT: list[tuple[str, str]] = [
+    (r"×{2,}", "×× / ×××"),
+    (r"(?<![A-Za-z])[Tt][Bb][Dd](?![A-Za-z])", "TBD"),
+    (r"(?i)placeholder", "placeholder"),
+]
+
+# SOFT —— 这几个字样有可能出现在正当名称中（例如软件名本身含「示例」二字，
+# 或型号中出现连写的大写 X），全文命中时仅判 WARN 交人工复核，不阻断交付；
+# 但用于「著作权人」「软件全称」这两个关键主体字段时，一律按 FAIL 处理，
+# 理由是这两个字段直接决定权利归属与登记名称，宁可误报也不可放过。
+PLACEHOLDER_TERMS_SOFT = ["示例", "样例", "测试用", "举例"]
+
+PLACEHOLDER_PATTERNS_SOFT: list[tuple[str, str]] = [
+    (r"(?<![A-Za-z0-9])[Xx]{2,}(?![A-Za-z0-9])", "XX / XXX"),
+    # 与同组 STRICT 档的 placeholder / TBD 一致，一律不区分大小写：软件名里的
+    # Demo、Test、Sample、ACME 与小写写法同属占位，此前遗漏 (?i) 会全部漏检。
+    (r"(?i)(?<![A-Za-z])(?:demo|test|example|sample|foo|bar|acme)(?![A-Za-z])", "demo/test/example/sample 等英文占位"),
+]
+
+# 关键主体字段：这两项决定权利归属与登记名称，须单独校验。
+KEY_IDENTITY_FIELDS = ("著作权人", "软件全称")
+
+# 关键主体字段的显式豁免文件：正当名称中确实可能含「示例」「XX」一类字样
+# （例如「示例教学管理系统」），若无解除路径，SOFT 命中即判 FAIL 会与
+# 「任何 FAIL 都须修复至 PASS/WARN」的交付要求形成死锁。用户在工作目录下
+# 放置该文件并逐字登记取值后，对应字段由 FAIL 转为 WARN。
+IDENTITY_CONFIRMATION_FILENAME = "主体名称确认.json"
+IDENTITY_CONFIRMATION_KEY = "identity_names_confirmed"
+
+# 明显不是真实主体名称的取值：泛称、留空标记与字段名本身。
+NON_ENTITY_VALUES = {
+    "著作权人", "权利人", "软件全称", "软件名称", "系统名称", "名称",
+    "公司", "企业", "个人", "软件", "系统",
+    "无", "暂无", "未知", "未定", "n/a", "na", "-", "—", "——", "/",
+}
+
+
+def find_placeholder_hits(text: str, include_field_scoped: bool = True) -> tuple[list[str], list[str]]:
+    """Return the (strict, soft) placeholder markers present in `text`.
+
+    `include_field_scoped` 控制是否一并检测 UNCONFIRMED_TERMS_FIELD_SCOPED
+    这一组偏泛的词。传入短字段的取值时保持默认 True；传入整份
+    申请表信息.docx 或叙述性字段正文时须显式传 False，否则正当中文会被误判。
+    """
+    value = str(text or "")
+    terms = UNCONFIRMED_TERMS_GLOBAL + (UNCONFIRMED_TERMS_FIELD_SCOPED if include_field_scoped else [])
+    strict = [term for term in terms if term in value]
+    strict += [label for pattern, label in PLACEHOLDER_PATTERNS_STRICT if re.search(pattern, value)]
+    soft = [term for term in PLACEHOLDER_TERMS_SOFT if term in value]
+    soft += [label for pattern, label in PLACEHOLDER_PATTERNS_SOFT if re.search(pattern, value)]
+    return strict, soft
+
+
+def has_strict_placeholder(text: str, include_field_scoped: bool = True) -> bool:
+    return bool(find_placeholder_hits(text, include_field_scoped)[0])
+
+# 申请表字段长度限制：(字段名, 最少有效字符数(0 表示无下限), 最多有效字符数)
+FIELD_LENGTH_LIMITS: list[tuple[str, int, int]] = [
+    ("开发目的", 0, 50),
+    ("面向领域 / 行业", 0, 50),
+    ("软件的主要功能", 500, 1300),
+    ("软件的技术特点", 0, 100),
+]
+
+# 叙述性字段：取值是成段中文，UNCONFIRMED_TERMS_FIELD_SCOPED 一组不施加于此，
+# 以免「待完善」「待定」「占位内容」「公司名称（」一类正当措辞被误判为占位残留。
+PROSE_FIELDS = {name for name, _, _ in FIELD_LENGTH_LIMITS}
+
+FIELD_LINE_RE = re.compile(r"^➤([^：]+)：(.*)$")
+
+
+def load_identity_confirmation(workdir: Path) -> dict[str, str]:
+    """Read the user's explicit key-identity-field confirmation, if present.
+
+    返回 {字段名: 已确认取值}。仅当文件存在、可解析、`identity_names_confirmed`
+    为真且 `fields` 是对象时才返回内容；任一条件不满足一律返回空字典，
+    确保豁免只在用户确有明确记录时生效。
+    """
+    path = workdir / IDENTITY_CONFIRMATION_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = read_json(path)
+    except Exception:
+        return {}
+    if not isinstance(data, dict) or not data.get(IDENTITY_CONFIRMATION_KEY):
+        return {}
+    fields = data.get("fields")
+    if not isinstance(fields, dict):
+        return {}
+    return {str(key).strip(): value.strip() for key, value in fields.items() if isinstance(value, str)}
+
+
+def identity_confirmation_hint(workdir: Path, field_name: str, value: str) -> str:
+    """Tell the user exactly how to record the exemption for one field."""
+    return (
+        f"若确系真实主体名称，须由用户在 {workdir / IDENTITY_CONFIRMATION_FILENAME} 中登记明确确认后重新校验，"
+        f'文件内容形如：{{"{IDENTITY_CONFIRMATION_KEY}": true, "confirmed_by": "<确认人>", '
+        f'"confirmed_at": "<YYYY-MM-DD>", "fields": {{"{field_name}": "{value}"}}}}'
+        "（fields 中的取值须与申请表逐字一致；取值一经改动，该确认自动失效）"
+    )
+
+
+class CheckResult:
+    __slots__ = ("name", "status", "message")
+
+    def __init__(self, name: str, status: str, message: str) -> None:
+        self.name = name
+        self.status = status  # "PASS" | "FAIL" | "WARN"
+        self.message = message
+
+
+RESULTS: list[CheckResult] = []
+
+
+def record(name: str, status: str, message: str) -> None:
+    if status not in ("PASS", "FAIL", "WARN"):
+        raise ValueError(f"invalid status: {status}")
+    RESULTS.append(CheckResult(name, status, message))
+
+
+# ---------------------------------------------------------------------------
+# DOCX helpers (zipfile-based, python-docx optional)
+
+
+def docx_header_text(docx_path: Path) -> str | None:
+    """Concatenate all <w:t> text found in the first word/headerN.xml part."""
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            names = zf.namelist()
+            header_name = next(
+                (n for n in sorted(names) if re.fullmatch(r"word/header\d*\.xml", n)), None
+            )
+            if not header_name:
+                return None
+            xml = zf.read(header_name).decode("utf-8", errors="replace")
+        return "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", xml))
+    except Exception:
+        return None
+
+
+def docx_page_break_count(docx_path: Path) -> int | None:
+    """Count explicit <w:br w:type="page"/> breaks in word/document.xml."""
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            xml = zf.read("word/document.xml").decode("utf-8", errors="replace")
+        return len(re.findall(r'<w:br\b[^>]*\bw:type="page"[^>]*/?>', xml))
+    except Exception:
+        return None
+
+
+def docx_body_text(docx_path: Path) -> str:
+    """Return the concatenated body text of a docx file.
+
+    Uses python-docx's `doc.paragraphs` when available; otherwise falls back to
+    zipfile + a plain <w:t> regex over word/document.xml so this still works
+    without python-docx installed.
+    """
+    if DOCX_AVAILABLE:
+        try:
+            doc = Document(str(docx_path))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception:
+            pass
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            xml = zf.read("word/document.xml").decode("utf-8", errors="replace")
+        return "\n".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", xml))
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# 申请表信息.docx parsing
+
+
+def parse_application_fields(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        match = FIELD_LINE_RE.match(line)
+        if match:
+            fields[match.group(1).strip()] = match.group(2).strip()
+    return fields
+
+
+# ---------------------------------------------------------------------------
+# Checks
+
+
+def find_one(formal_dir: Path, pattern: str, label: str, check_prefix: str) -> Path | None:
+    check_name = f"{check_prefix} / {label}"
+    matches = sorted(formal_dir.glob(pattern)) if formal_dir.exists() else []
+    if not matches:
+        record(check_name, "FAIL", f"未在 {formal_dir} 找到匹配 `{pattern}` 的文件")
+        return None
+    extra_note = ""
+    if len(matches) > 1:
+        extra_note = f"（找到 {len(matches)} 个匹配文件，本次校验使用第一个：{', '.join(p.name for p in matches)}）"
+    path = matches[0]
+    size = path.stat().st_size
+    if size > 0:
+        record(check_name, "WARN" if extra_note else "PASS", f"{path} 存在且非空（{size} 字节）{extra_note}")
+    else:
+        record(check_name, "FAIL", f"{path} 存在但文件大小为 0 字节{extra_note}")
+        return None
+    return path
+
+
+def check_file_completeness(formal_dir: Path) -> tuple[Path | None, Path | None, Path | None, Path | None]:
+    check_prefix = "1. 文件完整性"
+
+    app_docx = formal_dir / "申请表信息.docx"
+    if not formal_dir.exists():
+        record(check_prefix, "FAIL", f"正式资料目录不存在：{formal_dir}")
+        return None, None, None, None
+    if app_docx.exists() and app_docx.stat().st_size > 0:
+        record(f"{check_prefix} / 申请表信息.docx", "PASS", f"{app_docx} 存在且非空（{app_docx.stat().st_size} 字节）")
+    elif app_docx.exists():
+        record(f"{check_prefix} / 申请表信息.docx", "FAIL", f"{app_docx} 存在但文件大小为 0 字节")
+        app_docx = None
+    else:
+        record(f"{check_prefix} / 申请表信息.docx", "FAIL", f"缺少文件：{app_docx}")
+        app_docx = None
+
+    code_docx = find_one(formal_dir, "*-代码(*).docx", "代码材料 docx（*-代码(*).docx）", check_prefix)
+    manual_docx = find_one(formal_dir, "*_用户手册.docx", "用户手册 docx（*_用户手册.docx）", check_prefix)
+    design_docx = find_one(formal_dir, "*-软件设计说明书.docx", "软件设计说明书 docx（*-软件设计说明书.docx）", check_prefix)
+    return app_docx, code_docx, manual_docx, design_docx
+
+
+def check_naming_consistency(
+    app_fields: dict[str, str], code_docx: Path | None, manual_docx: Path | None, design_docx: Path | None
+) -> None:
+    check_name = "2. 命名一致性"
+    software_name = app_fields.get("软件全称", "").strip()
+    version = app_fields.get("版本号", "").strip()
+
+    if not software_name or has_strict_placeholder(software_name):
+        record(check_name, "FAIL", f"申请表信息.docx 的「软件全称」字段异常，无法作为命名基准：{software_name!r}")
+        return
+    if not version or has_strict_placeholder(version):
+        record(check_name, "FAIL", f"申请表信息.docx 的「版本号」字段异常，无法作为命名基准：{version!r}")
+        return
+
+    expected_header = f"{software_name} {version}"
+
+    for label, path in (("代码材料 docx", code_docx), ("用户手册 docx", manual_docx), ("软件设计说明书 docx", design_docx)):
+        if path is None:
+            record(f"{check_name} / {label}", "WARN", "文件缺失（已在文件完整性检查中报告），跳过命名比对")
+            continue
+
+        if not path.name.startswith(software_name):
+            record(
+                f"{check_name} / {label} 文件名",
+                "FAIL",
+                f"期望文件名以软件全称「{software_name}」开头，实际文件名为 {path.name!r}",
+            )
+        else:
+            record(f"{check_name} / {label} 文件名", "PASS", f"{path.name} 以软件全称「{software_name}」开头")
+
+        if label == "软件设计说明书 docx" and "-软件设计说明书.docx" not in path.name:
+            record(f"{check_name} / {label} 文件名", "FAIL", f"设计说明书文件名应以「-软件设计说明书.docx」结尾，实际为 {path.name!r}")
+
+        if label == "软件设计说明书 docx":
+            continue  # 样例模板没有页眉；封面名称、版本和目录在 check_design_spec 中核对。
+
+        header_text = docx_header_text(path)
+        if header_text is None:
+            record(
+                f"{check_name} / {label} 页眉",
+                "WARN",
+                f"未能从 {path.name} 提取页眉文字（可能缺少 word/header*.xml 或读取失败），跳过页眉一致性比对",
+            )
+        elif expected_header not in header_text:
+            record(
+                f"{check_name} / {label} 页眉",
+                "FAIL",
+                f"期望页眉文字包含「{expected_header}」（软件全称+版本号），实际页眉文字为 {header_text!r}",
+            )
+        else:
+            record(f"{check_name} / {label} 页眉", "PASS", f"页眉文字包含「{expected_header}」")
+
+
+def check_page_count(app_fields: dict[str, str], code_docx: Path | None) -> None:
+    check_name = "3. 页数一致性"
+    if code_docx is None:
+        record(check_name, "WARN", "代码材料 docx 缺失（已在文件完整性检查中报告），跳过页数比对")
+        return
+
+    declared = app_fields.get("页数", "").strip()
+    if not declared.isdigit():
+        record(check_name, "FAIL", f"申请表信息.docx 的「页数」字段不是纯数字：{declared!r}")
+        return
+    declared_pages = int(declared)
+
+    break_count = docx_page_break_count(code_docx)
+    if break_count is None:
+        record(check_name, "WARN", f"未能读取 {code_docx.name} 的 word/document.xml 分页符，跳过页数比对")
+        return
+    actual_pages = break_count + 1
+    basis = (
+        f"依据为 {code_docx.name} 中显式分页符（`<w:br w:type=\"page\"/>`）的数量 {break_count}，"
+        f"按「页数 = 分页符数量 + 1」推算为 {actual_pages} 页。"
+        "代码生成器按六号字和单页可容纳的换行数检查，超限时停止生成。"
+    )
+    if declared_pages != actual_pages:
+        record(check_name, "FAIL", f"申请表「页数」字段为 {declared_pages}，与推算页数 {actual_pages} 不一致。{basis}")
+    else:
+        record(check_name, "PASS", f"申请表「页数」= {declared_pages}，与推算页数一致。{basis}")
+
+
+def check_key_identity_fields(app_fields: dict[str, str], check_prefix: str, workdir: Path) -> None:
+    """FAIL on 著作权人 / 软件全称 that are empty, placeholder-filled, or obviously not real.
+
+    这两个字段直接决定权利归属与登记名称，一旦带着占位内容交付，材料即属虚假申报，
+    故 STRICT 与 SOFT 两档占位字样命中均判 FAIL。
+
+    SOFT 档另设显式豁免路径：正当名称中确实可能含「示例」「XX」一类字样，若无
+    解除机制，这类名称会与「任何 FAIL 都须修复至 PASS/WARN」的交付要求形成死锁。
+    用户在工作目录的 主体名称确认.json 中逐字登记取值后，该字段转为 WARN 并注明依据。
+    STRICT 档（「某某」「待用户确认」等）不设豁免：这类字样不可能是真实主体名称。
+    """
+    confirmed_names = load_identity_confirmation(workdir)
+    for field_name in KEY_IDENTITY_FIELDS:
+        sub_check = f"{check_prefix} / 关键主体字段 {field_name}"
+        value = app_fields.get(field_name, "").strip()
+        if not value:
+            record(sub_check, "FAIL", f"「{field_name}」字段缺失或为空，交付前须替换为真实主体")
+            continue
+        strict_hits, soft_hits = find_placeholder_hits(value)
+        if strict_hits:
+            record(
+                sub_check,
+                "FAIL",
+                f"「{field_name}」取值 {value!r} 命中占位字样 {strict_hits}，交付前须替换为真实主体。"
+                "该档字样不设豁免，须改用真实名称后重新生成正式资料",
+            )
+            continue
+        if soft_hits:
+            if confirmed_names.get(field_name) == value:
+                record(
+                    sub_check,
+                    "WARN",
+                    f"「{field_name}」取值 {value!r} 命中可疑占位字样 {soft_hits}，"
+                    f"但 {IDENTITY_CONFIRMATION_FILENAME} 已记录用户对该取值的明确确认"
+                    f"（{IDENTITY_CONFIRMATION_KEY}=true，且 fields[\"{field_name}\"] 与当前取值逐字一致），"
+                    "据此转为 WARN。若该名称并非真实主体，须删除该确认记录并替换为真实主体",
+                )
+                continue
+            record(
+                sub_check,
+                "FAIL",
+                f"「{field_name}」取值 {value!r} 命中可疑占位字样 {soft_hits}。该字段决定权利归属与登记名称，"
+                f"默认判失败。{identity_confirmation_hint(workdir, field_name, value)}；否则交付前须替换为真实主体",
+            )
+            continue
+        bare = re.sub(r"[\s（）()【】\[\]]+", "", value)
+        if bare.lower() in NON_ENTITY_VALUES or len(bare) < 2:
+            record(
+                sub_check,
+                "FAIL",
+                f"「{field_name}」取值 {value!r} 是泛称或字段名本身，不构成真实主体名称，交付前须替换为真实主体",
+            )
+            continue
+        record(sub_check, "PASS", f"「{field_name}」取值 {value!r} 未发现占位字样，且不是泛称")
+
+
+def check_placeholder_residue(
+    workdir: Path, app_docx: Path | None, manual_docx: Path | None, app_fields: dict[str, str]
+) -> None:
+    check_name = "4. 占位符/未确认内容残留"
+
+    if app_docx is not None:
+        text = docx_body_text(app_docx)
+        # 全文只检测语义上不可能构成真实叙述的强占位字样：申请表含 500 至 1300 字的
+        # 「软件的主要功能」正文，偏泛的词（待完善、待定、占位内容、公司名称（）
+        # 扫全文必然误伤正当中文，故改为逐字段检测，且跳过叙述性字段。
+        strict_hits, soft_hits = find_placeholder_hits(text, include_field_scoped=False)
+        for field_name, field_value in app_fields.items():
+            if field_name in PROSE_FIELDS:
+                continue
+            field_strict, _ = find_placeholder_hits(field_value, include_field_scoped=True)
+            for hit in field_strict:
+                labelled = f"{hit}（字段「{field_name}」）"
+                if hit not in strict_hits and labelled not in strict_hits:
+                    strict_hits.append(labelled)
+        if strict_hits:
+            record(
+                f"{check_name} / 申请表信息.docx",
+                "FAIL",
+                f"申请表信息.docx 全文中仍含有占位字样：{strict_hits}，说明存在字段未被真正补全就进入了正式材料",
+            )
+        elif soft_hits:
+            record(
+                f"{check_name} / 申请表信息.docx",
+                "WARN",
+                f"申请表信息.docx 全文中出现可疑占位字样：{soft_hits}。这几个字样也可能是正当内容的一部分"
+                "（例如软件名本身含「示例」二字），故不直接判失败，须人工确认其确为真实内容",
+            )
+        else:
+            record(f"{check_name} / 申请表信息.docx", "PASS", "申请表信息.docx 未发现占位或未确认字样")
+    else:
+        record(f"{check_name} / 申请表信息.docx", "WARN", "申请表信息.docx 缺失（已在文件完整性检查中报告），跳过残留检测")
+
+    check_key_identity_fields(app_fields, check_name, workdir)
+
+    if manual_docx is None:
+        record(f"{check_name} / 用户手册截图占位", "WARN", "用户手册 docx 缺失（已在文件完整性检查中报告），跳过截图占位检测")
+        return
+
+    manual_text = docx_body_text(manual_docx)
+    placeholder_terms = [t for t in SCREENSHOT_PLACEHOLDER_TERMS if t in manual_text]
+    if not placeholder_terms:
+        record(f"{check_name} / 用户手册截图占位", "PASS", "用户手册正文未发现截图占位字样")
+        return
+
+    screenshot_json = workdir / "截图方式确认.json"
+    screenshot_method = None
+    if screenshot_json.exists():
+        try:
+            screenshot_method = read_json(screenshot_json).get("screenshot_method")
+        except Exception:
+            screenshot_method = None
+
+    if screenshot_method in {"skip", "user-supplied"}:
+        record(
+            f"{check_name} / 用户手册截图占位",
+            "WARN",
+            f"用户手册正文含有截图占位字样 {placeholder_terms}；截图方式为 {screenshot_method!r}，"
+            "须核对缺图模块，并在生成报告中说明原因",
+        )
+    else:
+        record(
+            f"{check_name} / 用户手册截图占位",
+            "FAIL",
+            f"用户手册正文含有截图占位字样 {placeholder_terms}，但 截图方式确认.json 的 screenshot_method="
+            f"{screenshot_method!r}，不是允许的 user-supplied 或 skip",
+        )
+
+
+MANUAL_HEADING_RE = re.compile(r"^\s*(?:\d+\.\s*|[零一二三四五六七八九十百]+、\s*)(.+?)\s*$")
+
+
+def manual_sections_containing(manual_text: str, phrase: str) -> list[str]:
+    """Return the titles of the chapters whose body contains `phrase`.
+
+    章节边界按正文里的中文大写序号标题行切分；出现在任何标题之前的文字归入空标题。
+    """
+    owners: list[str] = []
+    current = ""
+    for line in manual_text.splitlines():
+        heading = MANUAL_HEADING_RE.match(line)
+        if heading:
+            current = heading.group(1)
+            if phrase in current:
+                owners.append(current)
+            continue
+        if phrase in line:
+            owners.append(current)
+    return owners
+
+
+def check_application_boilerplate(app_docx: Path | None, check_prefix: str) -> None:
+    """Scan 申请表信息.docx for the known fabricated / template phrases.
+
+    申请表的「软件的主要功能」有 500 字下限，历来是套话的高发处；这些句子一旦出现，
+    即表明该字段不是依据真实项目写出的，故与用户手册的固定黑名单同档判 FAIL。
+    """
+    sub_check = f"{check_prefix} / 申请表信息.docx"
+    if app_docx is None:
+        record(sub_check, "WARN", "申请表信息.docx 缺失（已在文件完整性检查中报告），跳过套话检测")
+        return
+    text = docx_body_text(app_docx)
+    hit = [phrase for phrase in ALL_UNCONDITIONAL_PHRASES if phrase in text]
+    if hit:
+        record(
+            sub_check,
+            "FAIL",
+            f"申请表信息.docx 含有已知套话句式：{hit}。这类句子换成任何其他软件同样成立，"
+            "属编造内容，须依据项目真实功能重写对应字段后重新生成正式资料",
+        )
+    else:
+        record(sub_check, "PASS", "申请表信息.docx 未发现固定黑名单套话")
+
+
+def check_fabricated_phrases(workdir: Path, manual_docx: Path | None, app_docx: Path | None = None) -> None:
+    check_name = "5. 编造/套话内容检测"
+    check_application_boilerplate(app_docx, check_name)
+
+    if manual_docx is None:
+        record(check_name, "WARN", "用户手册 docx 缺失（已在文件完整性检查中报告），跳过套话检测")
+        return
+
+    manual_text = docx_body_text(manual_docx)
+
+    hit = [p for p in ALL_UNCONDITIONAL_PHRASES if p in manual_text]
+    if hit:
+        record(f"{check_name} / 固定黑名单", "FAIL", f"用户手册正文含有已知问题套话：{hit}")
+    else:
+        record(f"{check_name} / 固定黑名单", "PASS", "用户手册正文未发现固定黑名单套话")
+
+    cond_check = f"{check_name} / 条件黑名单（总体设计/详细设计/测试案例）"
+    undeclared: list[str] = []
+    for phrase in CONDITIONAL_BLACKLIST_PHRASES:
+        if phrase not in manual_text:
+            continue
+        undeclared.append(phrase)
+
+    if undeclared:
+        record(
+            cond_check,
+            "FAIL",
+            f"固定五章用户手册正文含有疑似套话：{undeclared}",
+        )
+    else:
+        record(cond_check, "PASS", "用户手册正文未发现总体设计/详细设计/测试案例字样")
+
+
+def check_screenshot_dimensions(manual_docx: Path | None) -> None:
+    check_name = "6. 截图健全性"
+    if manual_docx is None:
+        record(check_name, "WARN", "用户手册 docx 缺失（已在文件完整性检查中报告），跳过截图尺寸检测")
+        return
+    if not DOCX_AVAILABLE:
+        record(check_name, "WARN", "python-docx 不可用，跳过截图宽高检测。该检查依赖 python-docx 的 inline_shapes API，无法改由 zipfile 缺省实现")
+        return
+
+    try:
+        doc = Document(str(manual_docx))
+    except Exception as exc:
+        record(check_name, "WARN", f"无法用 python-docx 打开 {manual_docx.name}：{exc}")
+        return
+
+    shapes = list(doc.inline_shapes)
+    if not shapes:
+        record(check_name, "WARN", f"{manual_docx.name} 中未发现任何内嵌图片（inline_shapes 为空）。若用户手册应含截图，须人工核实是否存在漏插")
+        return
+
+    problems: list[str] = []
+    for idx, shape in enumerate(shapes, start=1):
+        try:
+            width_in = shape.width / 914400
+            height_in = shape.height / 914400
+        except Exception as exc:
+            problems.append(f"第 {idx} 张图片无法读取宽高：{exc}")
+            continue
+        if width_in > IMAGE_MAX_WIDTH_IN + IMAGE_SIZE_TOLERANCE_IN:
+            problems.append(
+                f"第 {idx} 张图片宽度 {width_in:.3f} 英寸，超过上限 {IMAGE_MAX_WIDTH_IN} 英寸（含 {IMAGE_SIZE_TOLERANCE_IN} 英寸容差）"
+            )
+        if height_in > IMAGE_MAX_HEIGHT_IN + IMAGE_SIZE_TOLERANCE_IN:
+            problems.append(
+                f"第 {idx} 张图片高度 {height_in:.3f} 英寸，超过上限 {IMAGE_MAX_HEIGHT_IN} 英寸（含 {IMAGE_SIZE_TOLERANCE_IN} 英寸容差）"
+            )
+
+    if problems:
+        record(check_name, "FAIL", f"{manual_docx.name} 共 {len(shapes)} 张内嵌图片，其中 {len(problems)} 处尺寸超出约束：" + "；".join(problems))
+    else:
+        record(
+            check_name,
+            "PASS",
+            f"{manual_docx.name} 共 {len(shapes)} 张内嵌图片，宽高均未超过约束（≤{IMAGE_MAX_WIDTH_IN}in × {IMAGE_MAX_HEIGHT_IN}in，含 {IMAGE_SIZE_TOLERANCE_IN} 英寸容差）",
+        )
+
+
+def check_field_lengths(app_fields: dict[str, str]) -> None:
+    check_name = "7. 申请表字段格式"
+    if not app_fields:
+        record(check_name, "WARN", "申请表信息.docx 缺失或为空（已在文件完整性检查中报告），跳过字段长度检测")
+        return
+
+    for field_name, min_chars, max_chars in FIELD_LENGTH_LIMITS:
+        sub_check = f"{check_name} / {field_name}"
+        value = app_fields.get(field_name, "")
+        if not value:
+            record(sub_check, "FAIL", "字段缺失或为空")
+            continue
+        # 这里逐一检查的都是 FIELD_LENGTH_LIMITS 所列的叙述性字段，与 PROSE_FIELDS 同源，
+        # 故不施加偏泛的字段级词表，判据与第 4 项占位符残留检测保持一致。
+        if has_strict_placeholder(value, include_field_scoped=False):
+            record(sub_check, "WARN", "字段仍含占位字样，跳过长度校验。该情形应已在第 4 项占位符残留检测中报出")
+            continue
+
+        length = effective_len(value)
+        bound_text = f"{min_chars} 至 {max_chars} 字" if min_chars else f"≤{max_chars} 字符"
+        if min_chars and length < min_chars:
+            record(sub_check, "FAIL", f"有效字符数（去空格/换行）为 {length}，低于下限 {min_chars}；限制为 {bound_text}")
+        elif length > max_chars:
+            record(sub_check, "FAIL", f"有效字符数（去空格/换行）为 {length}，超过上限 {max_chars}；限制为 {bound_text}")
+        else:
+            record(sub_check, "PASS", f"有效字符数（去空格/换行）为 {length}，符合限制（{bound_text}）")
+
+
+def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> None:
+    check_name = "9. 软件设计说明书"
+    if design_docx is None:
+        record(check_name, "FAIL", "缺少软件设计说明书 DOCX")
+        return
+    text = docx_body_text(design_docx)
+    software_name = app_fields.get("软件全称", "").strip()
+    version = app_fields.get("版本号", "").strip()
+    required = ["背景", "系统架构设计", "系统功能概述", "系统关键用例描述", "典型流程与应用场景"]
+    missing = [title for title in required if title not in text]
+    try:
+        with zipfile.ZipFile(design_docx) as zf:
+            document_xml = zf.read("word/document.xml").decode("utf-8", errors="replace")
+            word_xml = "\n".join(
+                zf.read(name).decode("utf-8", errors="replace")
+                for name in zf.namelist()
+                if name.startswith("word/") and name.endswith(".xml")
+            )
+        toc_present = "TOC" in document_xml
+    except Exception:
+        toc_present = False
+        word_xml = ""
+    if software_name and software_name not in text:
+        record(check_name, "FAIL", "设计说明书封面未包含申请表确认的软件全称")
+    elif version and version not in text:
+        record(check_name, "FAIL", "设计说明书封面未包含申请表确认的版本号")
+    elif not toc_present:
+        record(check_name, "FAIL", "设计说明书未保留模板目录域")
+    elif missing:
+        record(check_name, "FAIL", f"设计说明书缺少必备章节：{'、'.join(missing)}")
+    elif "{{SOFTWARE_NAME}}" in word_xml:
+        record(check_name, "FAIL", "设计说明书封面、目录或正文仍残留模板样例软件名称")
+    else:
+        record(check_name, "PASS", f"{design_docx.name} 已包含确认名称、版本、模板目录域和五类必备章节")
+
+
+def check_gates(workdir: Path) -> None:
+    check_name = "8. 确认记录完整性"
+
+    env_check_path = workdir / "环境检查.json"
+    requires_user_input = False
+    if env_check_path.exists():
+        try:
+            requires_user_input = bool(read_json(env_check_path).get("requires_user_input"))
+        except Exception:
+            record(f"{check_name} / 环境检查.json", "WARN", f"{env_check_path} 存在但无法解析为 JSON，按不需要 environment 确认点处理")
+    else:
+        record(f"{check_name} / 环境检查.json", "WARN", f"{env_check_path} 缺失，无法判断是否需要 environment 确认点，按不需要处理")
+
+    env_gate_check = f"{check_name} / environment"
+    if requires_user_input:
+        env_confirm_path = workdir / "环境确认.json"
+        confirmed = env_confirm_path.exists()
+        if confirmed:
+            try:
+                confirmed = bool(read_json(env_confirm_path).get("environment_confirmed"))
+            except Exception:
+                confirmed = False
+        if confirmed:
+            record(env_gate_check, "PASS", "环境检查显示需要用户选择，且 环境确认.json 已记录 environment_confirmed=true")
+        else:
+            record(
+                env_gate_check,
+                "FAIL",
+                "环境检查.json 显示 requires_user_input=true（python-docx 不可用），"
+                f"但 {env_confirm_path} 缺失或未记录 environment_confirmed=true",
+            )
+    else:
+        record(env_gate_check, "PASS", "环境检查.json 显示 requires_user_input=false（或缺失按不需要处理），无需 environment 确认点")
+
+    gate_specs: list[tuple[str, Path, str]] = [
+        ("business", workdir / "草稿" / "业务理解.json", "user_confirmed"),
+        ("code-selection", workdir / "草稿" / "代码文件选择.json", "user_confirmed"),
+        ("screenshot-method", workdir / "截图方式确认.json", "screenshot_method_confirmed"),
+        ("application-fields", workdir / "草稿" / "申请表字段确认.json", "application_fields_confirmed"),
+        ("markdown", workdir / "草稿" / "最终生成确认.json", "markdown_confirmed"),
+    ]
+    for stage, path, key in gate_specs:
+        sub_check = f"{check_name} / {stage}"
+        if not path.exists():
+            record(sub_check, "FAIL", f"缺少确认记录文件：{path}")
+            continue
+        try:
+            data = read_json(path)
+        except Exception as exc:
+            record(sub_check, "FAIL", f"{path} 存在但无法解析为 JSON：{exc}")
+            continue
+        value = data.get(key)
+        if stage == "screenshot-method" and data.get("screenshot_method") not in {"user-supplied", "skip"}:
+            record(sub_check, "FAIL", f"截图方式必须为 user-supplied 或 skip，实际为 {data.get('screenshot_method')!r}")
+        elif value:
+            record(sub_check, "PASS", f"{path} 已记录 {key}={value!r}")
+        else:
+            record(sub_check, "FAIL", f"{path} 存在，但 {key} 字段为 {value!r}（缺失或未确认），说明该确认点未被真正记录")
+
+
+# ---------------------------------------------------------------------------
+# Report rendering
+
+
+def render_report() -> tuple[str, dict[str, int]]:
+    counts = {"PASS": 0, "FAIL": 0, "WARN": 0}
+    lines = ["# 校验报告", "", "程序化校验结果（`scripts/verify_materials.py`），逐项列出：", ""]
+    for result in RESULTS:
+        counts[result.status] += 1
+        lines.append(f"- [{result.status}] {result.name}：{result.message}")
+    lines.append("")
+    lines.append(f"**汇总：通过 {counts['PASS']} 项、失败 {counts['FAIL']} 项、警告 {counts['WARN']} 项。**")
+    lines.append("")
+    lines.append(
+        "本报告仅覆盖可程序化判断的项目。代码真实性、业务真实性、截图匹配度等须由"
+        "独立 agent 或人工核实的项目，见 `references/verification_checklist.md` 第二部分，"
+        "本项校验无法亦不应替代该部分工作。"
+    )
+    return "\n".join(lines), counts
+
+
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="软著正式材料交付前程序化校验")
+    parser.add_argument("--workdir", default="软件著作权申请资料", help="skill 输出目录（默认为 软件著作权申请资料）")
+    args = parser.parse_args()
+
+    workdir = Path(args.workdir)
+    formal_dir = workdir / "正式资料"
+
+    app_docx, code_docx, manual_docx, design_docx = check_file_completeness(formal_dir)
+    app_fields = parse_application_fields(docx_body_text(app_docx)) if app_docx is not None else {}
+
+    check_naming_consistency(app_fields, code_docx, manual_docx, design_docx)
+    check_page_count(app_fields, code_docx)
+    check_placeholder_residue(workdir, app_docx, manual_docx, app_fields)
+    check_fabricated_phrases(workdir, manual_docx, app_docx)
+    check_screenshot_dimensions(manual_docx)
+    check_field_lengths(app_fields)
+    check_design_spec(design_docx, app_fields)
+    check_gates(workdir)
+
+    report_text, counts = render_report()
+    print(report_text)
+
+    report_path = workdir / "校验报告.md"
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(report_text + "\n", encoding="utf-8")
+        print(f"\n校验报告已写入：{report_path}")
+    except Exception as exc:
+        print(f"\n警告：校验报告写入失败：{exc}", file=sys.stderr)
+
+    return 1 if counts["FAIL"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
