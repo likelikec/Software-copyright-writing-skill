@@ -1294,66 +1294,14 @@ def build_manual_docx(md_path: Path, out_path: Path, base_dir: Path, software_na
     return refresh_manual_toc_with_layout(out_path, chapter_titles)
 
 
-# 代码鉴别材料的兜底命名：仅在 草稿/代码提取清单.json 缺失或字段不全时使用。
-# 抽取环节在无法凑成 30+30 页时会输出降级文件名（如 代码-前21页+后21页.md），
-# 该名不在下表之中，故正常路径一律以清单记录的 outputs 为准。
-CODE_SPEC_FALLBACK: list[tuple[str, str]] = [
-    ("代码-前后各30页.md", "-代码(前30页+后30页).docx"),
-    ("代码-全部.md", "-代码(全部).docx"),
-]
+CODE_SPEC_FALLBACK = ["代码-前后各30页.md", "代码-全部.md"]
 
 
-def _positive_int(value: Any) -> int | None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value if value > 0 else None
-
-
-def code_docx_name(
-    safe_name: str, md_name: str, manifest: dict[str, Any], warnings: list[str]
-) -> str:
-    """Derive the formal docx file name for one extracted code Markdown file.
-
-    命名一律保持 `<软件名>-代码(<段落说明>).docx` 的形状，因为下游的
-    verify_materials.py 按 `*-代码(*).docx` 定位该材料。
-    段落说明按清单的 mode 分三种取值：`front30_back30` 取 front_pages /
-    back_pages，`all_under_60_pages` 记为「全部」，`selected_under_60_pages`
-    记为「已选部分」（该模式下抽取环节无法确认已选文件覆盖全部候选源码，
-    材料不得称「全部」）。上述字段皆不可用时退回按 Markdown 主名推导，并追加警告。
-    """
-    mode = manifest.get("mode")
-    front_pages = _positive_int(manifest.get("front_pages"))
-    back_pages = _positive_int(manifest.get("back_pages"))
-
-    if mode == "front30_back30" and front_pages and back_pages:
-        return f"{safe_name}-代码(前{front_pages}页+后{back_pages}页).docx"
-    if mode == "all_under_60_pages" or md_name == "代码-全部.md":
-        return f"{safe_name}-代码(全部).docx"
-    if mode == "selected_under_60_pages" or md_name == "代码-已选部分.md":
-        rendered = manifest.get("rendered_pages")
-        warnings.append(
-            f"代码材料按「已选部分」生成：清单 mode={mode!r}，实际渲染 {rendered} 页，不足 60 页，"
-            "且抽取环节无法确认已选文件覆盖全部候选源码，故材料名与标题均不称「全部」。"
-            "如须按全部代码材料生成，应先核对 草稿/代码文件选择.json 后重新运行 extract_code_material.py"
-        )
-        return f"{safe_name}-代码(已选部分).docx"
-
-    stem = Path(md_name).stem
-    segment = stem[len("代码-") :] if stem.startswith("代码-") else stem
-    warnings.append(
-        f"草稿/代码提取清单.json 的 mode/front_pages/back_pages 字段不完整（mode={mode!r}、"
-        f"front_pages={manifest.get('front_pages')!r}、back_pages={manifest.get('back_pages')!r}），"
-        f"代码材料文件名已按 Markdown 主名 {md_name} 推导为「{segment}」"
-    )
-    return f"{safe_name}-代码({segment or '全部'}).docx"
-
-
-def resolve_code_specs(draft_dir: Path, safe_name: str) -> tuple[list[tuple[str, str]], list[str]]:
+def resolve_code_specs(draft_dir: Path, safe_name: str, safe_version: str) -> tuple[list[tuple[str, str]], list[str]]:
     """Return [(markdown 文件名, docx 文件名)] plus any warnings.
 
-    以 草稿/代码提取清单.json 的 outputs 字段为准，使抽取环节的降级命名
-    （例如 代码-前21页+后21页.md）同样能生成正式 Word；清单缺失或 outputs
-    不可用时回退至 CODE_SPEC_FALLBACK，并明确追加警告，避免代码材料静默缺失。
+    以 草稿/代码提取清单.json 的 outputs 字段定位源 Markdown。正式 Word
+    始终采用 `<软件全称>-<版本号>-源程序鉴别材料.docx`，页数模式留在提取清单中。
     """
     warnings: list[str] = []
     manifest_path = draft_dir / "代码提取清单.json"
@@ -1361,7 +1309,7 @@ def resolve_code_specs(draft_dir: Path, safe_name: str) -> tuple[list[tuple[str,
     if not manifest_path.exists():
         warnings.append(
             "缺少 草稿/代码提取清单.json，代码材料已回退至固定文件名映射"
-            f"（{'、'.join(md for md, _ in CODE_SPEC_FALLBACK)}），"
+            f"（{'、'.join(CODE_SPEC_FALLBACK)}），"
             "如抽取环节输出的是降级文件名，须重新运行 extract_code_material.py 生成清单"
         )
     else:
@@ -1384,9 +1332,12 @@ def resolve_code_specs(draft_dir: Path, safe_name: str) -> tuple[list[tuple[str,
             warnings.append(
                 "草稿/代码提取清单.json 未记录可用的 outputs 字段，代码材料已回退至固定文件名映射"
             )
-        return [(md_name, f"{safe_name}{suffix}") for md_name, suffix in CODE_SPEC_FALLBACK], warnings
+        outputs = CODE_SPEC_FALLBACK
 
-    specs = [(md_name, code_docx_name(safe_name, md_name, manifest, warnings)) for md_name in outputs]
+    if manifest.get("mode") == "selected_under_60_pages":
+        warnings.append("代码材料仅覆盖已选部分源码；请核对提取清单中的覆盖范围与实际页数")
+    docx_name = f"{safe_name}-{safe_version}-源程序鉴别材料.docx"
+    specs = [(md_name, docx_name) for md_name in outputs]
 
     # 页数未精确对齐时必须在生成报告中留痕：此时代码材料不足 30+30 共 60 页，
     # 申请表「页数」字段须按实际渲染页数填写，否则最终校验会判页数不一致。
@@ -1437,8 +1388,10 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
         outputs.append(app_docx)
     warnings.extend(app_warnings)
 
-    code_specs, code_spec_warnings = resolve_code_specs(draft_dir, safe_name)
+    code_specs, code_spec_warnings = resolve_code_specs(draft_dir, safe_name, safe_filename(final_version))
     warnings.extend(code_spec_warnings)
+    if sum((draft_dir / md_name).exists() for md_name, _ in code_specs) > 1:
+        raise RuntimeError("发现多份代码材料 Markdown；请在代码提取清单的 outputs 中只保留一份正式材料")
     code_outputs: list[Path] = []
     missing_code_md: list[str] = []
     for md_name, docx_name in code_specs:

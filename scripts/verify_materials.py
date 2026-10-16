@@ -34,7 +34,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from common import read_json
+from common import read_json, safe_filename
 
 try:
     # Reuse the exact 有效字符数 (whitespace/newline-stripped length) algorithm
@@ -374,7 +374,7 @@ def check_file_completeness(formal_dir: Path) -> tuple[Path | None, Path | None,
         record(f"{check_prefix} / 申请表信息.docx", "FAIL", f"缺少文件：{app_docx}")
         app_docx = None
 
-    code_docx = find_one(formal_dir, "*-代码(*).docx", "代码材料 docx（*-代码(*).docx）", check_prefix)
+    code_docx = find_one(formal_dir, "*-源程序鉴别材料.docx", "代码材料 docx（*-源程序鉴别材料.docx）", check_prefix)
     manual_docx = find_one(formal_dir, "*_用户手册.docx", "用户手册 docx（*_用户手册.docx）", check_prefix)
     design_docx = find_one(formal_dir, "*-软件设计说明书.docx", "软件设计说明书 docx（*-软件设计说明书.docx）", check_prefix)
     return app_docx, code_docx, manual_docx, design_docx
@@ -401,7 +401,13 @@ def check_naming_consistency(
             record(f"{check_name} / {label}", "WARN", "文件缺失（已在文件完整性检查中报告），跳过命名比对")
             continue
 
-        if not path.name.startswith(software_name):
+        if label == "代码材料 docx":
+            expected_name = f"{safe_filename(software_name)}-{safe_filename(version)}-源程序鉴别材料.docx"
+            if path.name != expected_name:
+                record(f"{check_name} / {label} 文件名", "FAIL", f"代码材料文件名应为 {expected_name!r}，实际为 {path.name!r}")
+            else:
+                record(f"{check_name} / {label} 文件名", "PASS", f"代码材料文件名与软件全称、版本号一致：{path.name}")
+        elif not path.name.startswith(software_name):
             record(
                 f"{check_name} / {label} 文件名",
                 "FAIL",
