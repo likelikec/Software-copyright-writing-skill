@@ -117,8 +117,6 @@ def build_fields(
 ) -> dict[str, str]:
     language = analysis.get("language") or "待用户确认"
     project = Path(analysis.get("project_root") or ".")
-    hardware_hint = current_hardware_environment()
-    dev_os_hint = current_operating_system()
     version_hint = version_confirmation_hint(analysis, version)
     software_name_hint = f"待用户确认（建议：{software_name}；请确认最终软件全称）"
 
@@ -129,22 +127,21 @@ def build_fields(
         "开发完成日期": "待用户确认（YYYY-MM-DD）",
         "开发方式": (business.get("development_situation") or "单独开发") if business else "单独开发",
         "软件说明": "原创",
-        "发表状态": "待用户确认（已发表/未发表）",
-        "首次发表日期": "待用户确认（YYYY-MM-DD，未发表则留空）",
-        "著作权人": "待用户确认",
-        "权利范围": (business.get("rights_scope") or "全部权利") if business else "全部权利",
-        "权利取得方式": (business.get("rights_acquisition") or "原始取得") if business else "原始取得",
-        "开发的硬件环境": hardware_hint,
-        "运行的硬件环境": hardware_hint,
-        "开发该软件的操作系统": dev_os_hint,
-        "软件开发环境 / 开发工具": f"开发环境: {dev_os_hint}/开发工具: {infer_ide_name(project)}",
-        "该软件的运行平台 / 操作系统": infer_runtime_os(analysis),
+        "发表状态": "未发表",
+        "首次发表日期": "",
+        "著作权人": "南京大学",
+        "权利范围": "全部权利",
+        "权利取得方式": "原始取得",
+        "开发的硬件环境": "Apple Silicon CPU 10核、arm64、内存32GB、硬盘约926GB",
+        "运行的硬件环境": "同开发环境",
+        "开发该软件的操作系统": "macOS 12.7.6",
+        "软件开发环境 / 开发工具": "Visual Studio Code",
+        "该软件的运行平台 / 操作系统": "VS Code 1.80+",
         "软件运行支撑环境 / 支持软件": infer_runtime_support(analysis, project),
         "编程语言": language,
         "源程序量": str(
             (analysis.get("source") or {}).get("total_line_count")
-            or manifest.get("source_line_count")
-            or manifest.get("selected_source_line_count")
+            or (analysis.get("source") or {}).get("line_count")
             or "待用户确认"
         ),
         "开发目的": (business.get("application_purpose") or f"待用户确认（≤50字符，须从宏观业务场景说明开发目的）") if business else "待用户确认（≤50字符，须从宏观业务场景说明开发目的）",
@@ -368,7 +365,7 @@ def infer_runtime_support(analysis: dict[str, Any], project: Path) -> str:
     deps = set((analysis.get("package") or {}).get("dependency_names") or [])
     frameworks = set(analysis.get("frameworks") or [])
 
-    support: list[str] = []
+    support: list[str] = ["Python 3.10+", "VS Code", "SQLite", "Chroma"]
     readme_requirements = extract_requirement_bullets(read_readme(project))
 
     if package_info or deps or frameworks & {"Vue", "React", "Vite", "Next.js", "Nuxt", "Svelte", "Astro", "Angular"}:
@@ -487,14 +484,13 @@ def write_application_md(path: Path, fields: dict[str, str], analysis: dict[str,
             "- 软件分类：应用软件/嵌入式软件/中间件/系统软件/其他。",
             "- 开发完成日期、首次发表日期：须使用 YYYY-MM-DD 格式。",
             "- 开发方式：单独开发/合作开发/委托开发/下达任务开发。",
-            "- 软件说明：原创 / 修改（含翻译软件、合成软件）。",
-            "- 发表状态：已发表或未发表。已发表时须附首次发表日期。",
-            "- 软件开发环境 / 开发工具：≤50字符，格式 `开发环境: <OS>/开发工具: <IDE名称>`。",
-            "- 开发该软件的操作系统：≤50字符，填写实际开发电脑的操作系统版本。",
-            "- 该软件的运行平台 / 操作系统：≤50字符，填写软件运行所在的操作系统或浏览器环境。",
-            "- 软件运行支撑环境 / 支持软件：≤50字符，直接列出运行依赖（如 Node.js、npm、浏览器），不加格式前缀。",
-            "- 开发的硬件环境与运行的硬件环境：≤50字符，可采用检测到的本机配置作为建议值。",
-            "- 源程序量：纯数字（不含「行」字），指全部源程序的总行数。",
+            "- 软件说明：本次默认原创；如项目实际情况不同，须在字段确认时修改。",
+            "- 发表状态：本次默认未发表，首次发表日期留空；如已发表，须修改状态并填写日期。",
+            "- 著作权人、权利范围、权利取得方式：本次分别默认南京大学、全部权利、原始取得，正式生成前核对项目事实。",
+            "- 开发硬件、操作系统与开发工具：使用本次指定值，正式生成前核对项目事实。",
+            "- 该软件的运行平台 / 操作系统：本次以 VS Code 1.80+ 为基础，其他平台须有项目证据。",
+            "- 软件运行支撑环境 / 支持软件：以 Python 3.10+、VS Code、SQLite、Chroma 为基础，其他依赖从项目配置补充，≤50字符。",
+            "- 编程语言：根据项目实际源码语言填写。源程序量：纯数字（不含「行」字），取项目全量源码统计，不用抽取材料行数代替。",
             "- 开发目的：≤50字符，从宏观业务场景说明软件用途，例如面向测试教学、科研实验与工程验证等真实场景；不得仅写软件名称。",
             "- 面向领域 / 行业：≤50字符。",
             "- 软件的主要功能：500 至 1300 字。",
