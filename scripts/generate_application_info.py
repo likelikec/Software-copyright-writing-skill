@@ -117,12 +117,11 @@ def build_fields(
 ) -> dict[str, str]:
     language = analysis.get("language") or "待用户确认"
     project = Path(analysis.get("project_root") or ".")
-    version_hint = version_confirmation_hint(analysis, version)
     software_name_hint = f"待用户确认（建议：{software_name}；请确认最终软件全称）"
 
     defaults = {
         "软件全称": software_name_hint,
-        "版本号": version_hint,
+        "版本号": "V1.0.0",
         "软件分类": (business.get("software_category") or "应用软件") if business else "应用软件",
         "开发完成日期": "待用户确认（YYYY-MM-DD）",
         "开发方式": (business.get("development_situation") or "单独开发") if business else "单独开发",
@@ -159,6 +158,7 @@ def build_fields(
         "页数": str(manifest.get("rendered_pages") or manifest.get("total_pages") or "待用户确认"),
     }
     defaults.update({k: v for k, v in answers.items() if v})
+    defaults["版本号"] = "V1.0.0"
 
     # 未发表时首次发表日期应为空，不触发待确认项
     publish_status = defaults.get("发表状态", "")
@@ -171,50 +171,6 @@ def build_fields(
     defaults["软件的主要功能"] = normalize_main_function(defaults.get("软件的主要功能"))
 
     return defaults
-
-
-def version_numbers(value: str) -> tuple[int, ...]:
-    raw = str(value or "").strip()
-    raw = raw.lstrip("vV")
-    parts = re.findall(r"\d+", raw)
-    return tuple(int(part) for part in parts[:3])
-
-
-def version_less_than_1(value: str) -> bool:
-    numbers = version_numbers(value)
-    return bool(numbers) and numbers[0] < 1
-
-
-def normalize_version_label(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    return raw if raw.upper().startswith("V") else f"V{raw}"
-
-
-def project_version_candidate(analysis: dict[str, Any]) -> str:
-    value = str((analysis.get("package") or {}).get("version") or "").strip()
-    if value and value.upper() != "V1.0":
-        return normalize_version_label(value)
-    return ""
-
-
-def version_confirmation_hint(analysis: dict[str, Any], requested_version: str) -> str:
-    project_version = project_version_candidate(analysis)
-    requested = normalize_version_label(requested_version or "V1.0")
-    if project_version and version_less_than_1(project_version):
-        return (
-            f"待用户确认（项目版本号为 {project_version}，首次登记通常建议从 V1.0 开始；"
-            f"请确认填写 V1.0 还是 {project_version}）"
-        )
-    if not project_version and version_less_than_1(requested):
-        return (
-            f"待用户确认（当前建议版本号为 {requested}，首次登记通常建议从 V1.0 开始；"
-            f"请确认填写 V1.0 还是 {requested}）"
-        )
-    if project_version and project_version != requested:
-        return f"待用户确认（项目版本号为 {project_version}，当前建议为 {requested}；请确认最终申报版本号）"
-    return f"待用户确认（建议：{requested}；请确认最终版本号）"
 
 
 def format_gb(size: int | None) -> str:
@@ -480,7 +436,7 @@ def write_application_md(path: Path, fields: dict[str, str], analysis: dict[str,
             "## 字段填写口径",
             "",
             "- 软件全称：须由用户确认。最终正式资料文件名、代码页眉与用户手册中的软件名称均以本字段为准。",
-            "- 版本号：须由用户确认。项目版本小于 V1.0 时，首次登记通常建议使用 V1.0，亦可按实际项目版本填写，最终以本字段为准。",
+            "- 版本号：本次统一填写 V1.0.0；代码材料、用户手册与设计说明书均使用同一版本号。",
             "- 软件分类：应用软件/嵌入式软件/中间件/系统软件/其他。",
             "- 开发完成日期、首次发表日期：须使用 YYYY-MM-DD 格式。",
             "- 开发方式：单独开发/合作开发/委托开发/下达任务开发。",
@@ -550,7 +506,7 @@ def main() -> None:
     parser.add_argument("--analysis", required=True)
     parser.add_argument("--code-manifest", required=True)
     parser.add_argument("--software-name", required=True)
-    parser.add_argument("--version", default="V1.0")
+    parser.add_argument("--version", default="V1.0.0")
     parser.add_argument("--answers", help="Optional JSON object with confirmed field values")
     parser.add_argument("--business-context", help="Business context JSON generated before material drafting")
     parser.add_argument("--out-dir", default="软件著作权申请资料/草稿")

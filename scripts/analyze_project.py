@@ -279,7 +279,7 @@ def analyze(project: Path) -> dict[str, Any]:
         "package": {
             "name": package_name,
             "path": rel(package_path, project) if package_path else "",
-            "version": str(package.get("version") or "V1.0") if package else "V1.0",
+            "version": str(package.get("version") or "V1.0.0") if package else "V1.0.0",
             "scripts": scripts,
             "dependency_names": sorted(dependencies),
         },

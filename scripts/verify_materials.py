@@ -74,7 +74,7 @@ IMAGE_SIZE_TOLERANCE_IN = 0.05
 #
 # 下列短语曾由生成环节硬编码产出，与具体项目无关，属模板套话；或系模型在操作
 # 手册正文中编造插入的内容。一旦在最终正式文档中再次出现，即表明可能发生同类
-# 回归。检测范围覆盖用户手册 docx 与 正式资料/申请表信息.docx 两份最终材料。
+# 回归。检测范围覆盖用户手册 docx 与 正式资料/申请表信息.txt 两份最终材料。
 # 后续遇到同类问题，将新短语加入对应列表即可，无须改动检查逻辑。
 #
 # 无条件黑名单：任何时候出现都判定为问题。
@@ -119,7 +119,7 @@ CONDITIONAL_BLACKLIST_PHRASES = [
 # 截图暂缺时可能保留的占位字样；仅允许用户提供截图或跳过截图两种方式。
 SCREENSHOT_PLACEHOLDER_TERMS = ["截图预留", "截图缺失", "截图无法插入"]
 
-# 申请表信息.docx 的占位残留字样，分两档（STRICT / SOFT），STRICT 档再按检测范围分两组。
+# 申请表信息.txt 的占位残留字样，分两档（STRICT / SOFT），STRICT 档再按检测范围分两组。
 #
 # STRICT-全文 —— 语义上不可能构成真实叙述，出现在任何位置（含 500 至 1300 字的
 # 「软件的主要功能」正文）都表明字段未被真正补全，全文命中即判 FAIL。
@@ -191,7 +191,7 @@ def find_placeholder_hits(text: str, include_field_scoped: bool = True) -> tuple
 
     `include_field_scoped` 控制是否一并检测 UNCONFIRMED_TERMS_FIELD_SCOPED
     这一组偏泛的词。传入短字段的取值时保持默认 True；传入整份
-    申请表信息.docx 或叙述性字段正文时须显式传 False，否则正当中文会被误判。
+    申请表信息.txt 或叙述性字段正文时须显式传 False，否则正当中文会被误判。
     """
     value = str(text or "")
     terms = UNCONFIRMED_TERMS_GLOBAL + (UNCONFIRMED_TERMS_FIELD_SCOPED if include_field_scoped else [])
@@ -322,7 +322,7 @@ def docx_body_text(docx_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 申请表信息.docx parsing
+# 申请表信息.txt parsing
 
 
 def parse_application_fields(text: str) -> dict[str, str]:
@@ -361,23 +361,26 @@ def find_one(formal_dir: Path, pattern: str, label: str, check_prefix: str) -> P
 def check_file_completeness(formal_dir: Path) -> tuple[Path | None, Path | None, Path | None, Path | None]:
     check_prefix = "1. 文件完整性"
 
-    app_docx = formal_dir / "申请表信息.docx"
+    app_txt = formal_dir / "申请表信息.txt"
     if not formal_dir.exists():
         record(check_prefix, "FAIL", f"正式资料目录不存在：{formal_dir}")
         return None, None, None, None
-    if app_docx.exists() and app_docx.stat().st_size > 0:
-        record(f"{check_prefix} / 申请表信息.docx", "PASS", f"{app_docx} 存在且非空（{app_docx.stat().st_size} 字节）")
-    elif app_docx.exists():
-        record(f"{check_prefix} / 申请表信息.docx", "FAIL", f"{app_docx} 存在但文件大小为 0 字节")
-        app_docx = None
+    legacy_form = formal_dir / "申请表信息.docx"
+    if legacy_form.exists():
+        record(f"{check_prefix} / 旧版申请表", "FAIL", f"正式资料中仍有旧版 Word 申请表：{legacy_form}；本次交付只使用申请表信息.txt")
+    if app_txt.exists() and app_txt.stat().st_size > 0:
+        record(f"{check_prefix} / 申请表信息.txt", "PASS", f"{app_txt} 存在且非空（{app_txt.stat().st_size} 字节）")
+    elif app_txt.exists():
+        record(f"{check_prefix} / 申请表信息.txt", "FAIL", f"{app_txt} 存在但文件大小为 0 字节")
+        app_txt = None
     else:
-        record(f"{check_prefix} / 申请表信息.docx", "FAIL", f"缺少文件：{app_docx}")
-        app_docx = None
+        record(f"{check_prefix} / 申请表信息.txt", "FAIL", f"缺少文件：{app_txt}")
+        app_txt = None
 
     code_docx = find_one(formal_dir, "*-源程序鉴别材料.docx", "代码材料 docx（*-源程序鉴别材料.docx）", check_prefix)
     manual_docx = find_one(formal_dir, "*_用户手册.docx", "用户手册 docx（*_用户手册.docx）", check_prefix)
     design_docx = find_one(formal_dir, "*-软件设计说明书.docx", "软件设计说明书 docx（*-软件设计说明书.docx）", check_prefix)
-    return app_docx, code_docx, manual_docx, design_docx
+    return app_txt, code_docx, manual_docx, design_docx
 
 
 def check_naming_consistency(
@@ -388,11 +391,13 @@ def check_naming_consistency(
     version = app_fields.get("版本号", "").strip()
 
     if not software_name or has_strict_placeholder(software_name):
-        record(check_name, "FAIL", f"申请表信息.docx 的「软件全称」字段异常，无法作为命名基准：{software_name!r}")
+        record(check_name, "FAIL", f"申请表信息.txt 的「软件全称」字段异常，无法作为命名基准：{software_name!r}")
         return
     if not version or has_strict_placeholder(version):
-        record(check_name, "FAIL", f"申请表信息.docx 的「版本号」字段异常，无法作为命名基准：{version!r}")
+        record(check_name, "FAIL", f"申请表信息.txt 的「版本号」字段异常，无法作为命名基准：{version!r}")
         return
+    if version != "V1.0.0":
+        record(check_name, "FAIL", f"申请表版本号须统一为 V1.0.0，实际为 {version!r}")
 
     expected_header = f"{software_name} {version}"
 
@@ -447,7 +452,7 @@ def check_page_count(app_fields: dict[str, str], code_docx: Path | None) -> None
 
     declared = app_fields.get("页数", "").strip()
     if not declared.isdigit():
-        record(check_name, "FAIL", f"申请表信息.docx 的「页数」字段不是纯数字：{declared!r}")
+        record(check_name, "FAIL", f"申请表信息.txt 的「页数」字段不是纯数字：{declared!r}")
         return
     declared_pages = int(declared)
 
@@ -524,12 +529,12 @@ def check_key_identity_fields(app_fields: dict[str, str], check_prefix: str, wor
 
 
 def check_placeholder_residue(
-    workdir: Path, app_docx: Path | None, manual_docx: Path | None, app_fields: dict[str, str]
+    workdir: Path, app_txt: Path | None, manual_docx: Path | None, app_fields: dict[str, str]
 ) -> None:
     check_name = "4. 占位符/未确认内容残留"
 
-    if app_docx is not None:
-        text = docx_body_text(app_docx)
+    if app_txt is not None:
+        text = app_txt.read_text(encoding="utf-8")
         # 全文只检测语义上不可能构成真实叙述的强占位字样：申请表含 500 至 1300 字的
         # 「软件的主要功能」正文，偏泛的词（待完善、待定、占位内容、公司名称（）
         # 扫全文必然误伤正当中文，故改为逐字段检测，且跳过叙述性字段。
@@ -544,21 +549,21 @@ def check_placeholder_residue(
                     strict_hits.append(labelled)
         if strict_hits:
             record(
-                f"{check_name} / 申请表信息.docx",
+                f"{check_name} / 申请表信息.txt",
                 "FAIL",
-                f"申请表信息.docx 全文中仍含有占位字样：{strict_hits}，说明存在字段未被真正补全就进入了正式材料",
+                f"申请表信息.txt 全文中仍含有占位字样：{strict_hits}，说明存在字段未被真正补全就进入了正式材料",
             )
         elif soft_hits:
             record(
-                f"{check_name} / 申请表信息.docx",
+                f"{check_name} / 申请表信息.txt",
                 "WARN",
-                f"申请表信息.docx 全文中出现可疑占位字样：{soft_hits}。这几个字样也可能是正当内容的一部分"
+                f"申请表信息.txt 全文中出现可疑占位字样：{soft_hits}。这几个字样也可能是正当内容的一部分"
                 "（例如软件名本身含「示例」二字），故不直接判失败，须人工确认其确为真实内容",
             )
         else:
-            record(f"{check_name} / 申请表信息.docx", "PASS", "申请表信息.docx 未发现占位或未确认字样")
+            record(f"{check_name} / 申请表信息.txt", "PASS", "申请表信息.txt 未发现占位或未确认字样")
     else:
-        record(f"{check_name} / 申请表信息.docx", "WARN", "申请表信息.docx 缺失（已在文件完整性检查中报告），跳过残留检测")
+        record(f"{check_name} / 申请表信息.txt", "WARN", "申请表信息.txt 缺失（已在文件完整性检查中报告），跳过残留检测")
 
     check_key_identity_fields(app_fields, check_name, workdir)
 
@@ -618,32 +623,32 @@ def manual_sections_containing(manual_text: str, phrase: str) -> list[str]:
     return owners
 
 
-def check_application_boilerplate(app_docx: Path | None, check_prefix: str) -> None:
-    """Scan 申请表信息.docx for the known fabricated / template phrases.
+def check_application_boilerplate(app_txt: Path | None, check_prefix: str) -> None:
+    """Scan 申请表信息.txt for the known fabricated / template phrases.
 
     申请表的「软件的主要功能」有 500 字下限，历来是套话的高发处；这些句子一旦出现，
     即表明该字段不是依据真实项目写出的，故与用户手册的固定黑名单同档判 FAIL。
     """
-    sub_check = f"{check_prefix} / 申请表信息.docx"
-    if app_docx is None:
-        record(sub_check, "WARN", "申请表信息.docx 缺失（已在文件完整性检查中报告），跳过套话检测")
+    sub_check = f"{check_prefix} / 申请表信息.txt"
+    if app_txt is None:
+        record(sub_check, "WARN", "申请表信息.txt 缺失（已在文件完整性检查中报告），跳过套话检测")
         return
-    text = docx_body_text(app_docx)
+    text = app_txt.read_text(encoding="utf-8")
     hit = [phrase for phrase in ALL_UNCONDITIONAL_PHRASES if phrase in text]
     if hit:
         record(
             sub_check,
             "FAIL",
-            f"申请表信息.docx 含有已知套话句式：{hit}。这类句子换成任何其他软件同样成立，"
+            f"申请表信息.txt 含有已知套话句式：{hit}。这类句子换成任何其他软件同样成立，"
             "属编造内容，须依据项目真实功能重写对应字段后重新生成正式资料",
         )
     else:
-        record(sub_check, "PASS", "申请表信息.docx 未发现固定黑名单套话")
+        record(sub_check, "PASS", "申请表信息.txt 未发现固定黑名单套话")
 
 
-def check_fabricated_phrases(workdir: Path, manual_docx: Path | None, app_docx: Path | None = None) -> None:
+def check_fabricated_phrases(workdir: Path, manual_docx: Path | None, app_txt: Path | None = None) -> None:
     check_name = "5. 编造/套话内容检测"
-    check_application_boilerplate(app_docx, check_name)
+    check_application_boilerplate(app_txt, check_name)
 
     if manual_docx is None:
         record(check_name, "WARN", "用户手册 docx 缺失（已在文件完整性检查中报告），跳过套话检测")
@@ -724,7 +729,7 @@ def check_screenshot_dimensions(manual_docx: Path | None) -> None:
 def check_field_lengths(app_fields: dict[str, str]) -> None:
     check_name = "7. 申请表字段格式"
     if not app_fields:
-        record(check_name, "WARN", "申请表信息.docx 缺失或为空（已在文件完整性检查中报告），跳过字段长度检测")
+        record(check_name, "WARN", "申请表信息.txt 缺失或为空（已在文件完整性检查中报告），跳过字段长度检测")
         return
 
     for field_name, min_chars, max_chars in FIELD_LENGTH_LIMITS:
@@ -757,6 +762,7 @@ def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> N
     text = docx_body_text(design_docx)
     software_name = app_fields.get("软件全称", "").strip()
     version = app_fields.get("版本号", "").strip()
+    expected_cover_title = f"{software_name}软件说明书"
     required = ["背景", "系统架构设计", "系统功能概述", "系统关键用例描述", "典型流程与应用场景"]
     missing = [title for title in required if title not in text]
     try:
@@ -771,8 +777,8 @@ def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> N
     except Exception:
         toc_present = False
         word_xml = ""
-    if software_name and software_name not in text:
-        record(check_name, "FAIL", "设计说明书封面未包含申请表确认的软件全称")
+    if software_name and expected_cover_title not in text:
+        record(check_name, "FAIL", f"设计说明书封面标题应为 {expected_cover_title!r}")
     elif version and version not in text:
         record(check_name, "FAIL", "设计说明书封面未包含申请表确认的版本号")
     elif not toc_present:
@@ -783,6 +789,21 @@ def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> N
         record(check_name, "FAIL", "设计说明书封面、目录或正文仍残留模板样例软件名称")
     else:
         record(check_name, "PASS", f"{design_docx.name} 已包含确认名称、版本、模板目录域和五类必备章节")
+    if DOCX_AVAILABLE and software_name and version:
+        try:
+            document = Document(str(design_docx))
+            title = next(p for p in document.paragraphs if p.text.strip() == expected_cover_title)
+            version_line = next(p for p in document.paragraphs if p.text.strip() == version)
+            title_run = next(r for r in title.runs if r.text.strip())
+            version_run = next(r for r in version_line.runs if r.text.strip())
+            title_ok = title_run.font.name == "宋体" and title_run.font.size and title_run.font.size.pt == 26
+            version_ok = version_run.font.name == "Times New Roman" and version_run.font.size and version_run.font.size.pt == 22
+            if title_ok and version_ok:
+                record(f"{check_name} / 首页字体", "PASS", "标题为宋体一号，版本号为 Times New Roman 二号")
+            else:
+                record(f"{check_name} / 首页字体", "FAIL", "标题或版本号字体、字号与规定不符")
+        except (OSError, StopIteration, ValueError) as exc:
+            record(f"{check_name} / 首页字体", "FAIL", f"无法核对封面字体：{exc}")
 
 
 def check_gates(workdir: Path) -> None:
@@ -877,13 +898,13 @@ def main() -> int:
     workdir = Path(args.workdir)
     formal_dir = workdir / "正式资料"
 
-    app_docx, code_docx, manual_docx, design_docx = check_file_completeness(formal_dir)
-    app_fields = parse_application_fields(docx_body_text(app_docx)) if app_docx is not None else {}
+    app_txt, code_docx, manual_docx, design_docx = check_file_completeness(formal_dir)
+    app_fields = parse_application_fields(app_txt.read_text(encoding="utf-8")) if app_txt is not None else {}
 
     check_naming_consistency(app_fields, code_docx, manual_docx, design_docx)
     check_page_count(app_fields, code_docx)
-    check_placeholder_residue(workdir, app_docx, manual_docx, app_fields)
-    check_fabricated_phrases(workdir, manual_docx, app_docx)
+    check_placeholder_residue(workdir, app_txt, manual_docx, app_fields)
+    check_fabricated_phrases(workdir, manual_docx, app_txt)
     check_screenshot_dimensions(manual_docx)
     check_field_lengths(app_fields)
     check_design_spec(design_docx, app_fields)

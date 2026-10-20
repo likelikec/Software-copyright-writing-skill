@@ -9,7 +9,7 @@ metadata:
   short-description: 生成并校验中国软件著作权申请材料
   author: suling-fun
   maintainer: likelikec
-  version: "5.1.0"
+  version: "5.2.0"
   repository: https://github.com/likelikec/Software-copyright-writing-skill
   upstream: https://github.com/Fokkyp/SoftwareCopyright-Skill
   upstream-version: "1.3"
@@ -23,7 +23,7 @@ metadata:
 ## 运行环境
 
 - Python 3.10 或更高版本；优先使用当前项目的相对路径 `.venv/bin/python`（若存在），否则使用 `python3`。
-- `python-docx` 是四类 Word 材料生成的必需依赖；缺失时先安装再生成正式材料。
+- `python-docx` 是代码、用户手册和设计说明书三类 Word 材料生成的必需依赖；申请表信息输出 TXT。
 - `soffice` 与 `pypdf` 可自动核准用户手册目录页码；缺失时生成后须在 Word 中更新目录并核对页码。
 - 用户手册截图只接受用户放入 `用户截图/` 的 PNG/JPG/JPEG/WebP；本 skill 不启动项目或自动截取页面。
 
@@ -44,7 +44,7 @@ test -f "${SKILL_DIR}/scripts/check_environment.py"
 - 代码 Word 命名为 `<软件全称>-<版本号>-源程序鉴别材料.docx`；正文使用 Courier New 六号字（7.5 磅），长行在保留源码字符的前提下换行，超出单页容量时停止生成。
 - 用户手册第一页为宋体一号居中封面，第二页为五章目录，正文从第三页开始。
 - 软件设计说明书使用内置模板的首页、目录和样式，正文由模型依据项目证据撰写，输出完整 DOCX。
-- 正式材料统一使用用户已确认的“软件全称”和“版本号”。
+- 正式材料统一使用用户已确认的“软件全称”；本次申请表版本号固定为 `V1.0.0`，其余材料与之保持一致。
 - 创建任何文件前先读取 [references/output_directory_rules.md](references/output_directory_rules.md)。
 
 ## 人工确认闸门
@@ -102,7 +102,7 @@ python3 ${SKILL_DIR}/scripts/generate_application_info.py \
   --analysis 软件著作权申请资料/analysis/project.json \
   --code-manifest 软件著作权申请资料/草稿/代码提取清单.json \
   --business-context 软件著作权申请资料/草稿/业务理解.json \
-  --software-name "<软件全称>" --version "<版本号>" \
+  --software-name "<软件全称>" --version "V1.0.0" \
   --out-dir 软件著作权申请资料/草稿
 ```
 
@@ -148,7 +148,7 @@ python3 ${SKILL_DIR}/scripts/capture_screenshots.py \
 python3 ${SKILL_DIR}/scripts/generate_user_manual_draft.py \
   --analysis 软件著作权申请资料/analysis/project.json \
   --business-context 软件著作权申请资料/草稿/业务理解.json \
-  --software-name "<软件全称>" --version "<版本号>" \
+  --software-name "<软件全称>" --version "V1.0.0" \
   --out-dir 软件著作权申请资料/草稿
 ```
 
@@ -157,11 +157,11 @@ python3 ${SKILL_DIR}/scripts/generate_user_manual_draft.py \
 ```bash
 python3 ${SKILL_DIR}/scripts/generate_design_spec.py \
   --business-context 软件著作权申请资料/草稿/业务理解.json \
-  --software-name "<软件全称>" --version "<版本号>" \
+  --software-name "<软件全称>" --version "V1.0.0" \
   --out-dir 软件著作权申请资料/草稿 --draft-only
 ```
 
-设计说明书正文必须包括背景、系统架构设计（含架构、接口、数据库及项目需要的后续小节）、系统功能概述、系统关键用例描述、典型流程与应用场景。正式 DOCX 由第 9 步在 Markdown 确认后生成，模板为 `assets/design_spec_template.docx`。
+设计说明书正文必须包括背景、系统架构设计（含架构、接口、数据库及项目需要的后续小节）、系统功能概述、系统关键用例描述、典型流程与应用场景。系统功能概述的每个小节按 [references/business_understanding_rules.md](references/business_understanding_rules.md) 写足职责、入口、输入、处理、结果和边界等有证据的细节。正式 DOCX 由第 9 步在 Markdown 确认后生成，模板为 `assets/design_spec_template.docx`。
 
 ### 8. Markdown 草稿确认
 
@@ -177,11 +177,11 @@ python3 ${SKILL_DIR}/scripts/confirm_stage.py \
 ```bash
 python3 ${SKILL_DIR}/scripts/build_docx_from_md.py \
   --workdir 软件著作权申请资料 \
-  --software-name "<软件全称>" --version "<版本号>"
+  --software-name "<软件全称>" --version "V1.0.0"
 ```
 
-输出 `正式资料/申请表信息.docx`、`<软件全称>-<版本号>-源程序鉴别材料.docx`、`<软件全称>_用户手册.docx` 和 `<软件全称>-<版本号>-软件设计说明书.docx`。用户手册封面、目录与正文由已确认的软件名称和版本号生成；设计说明书首页、目录和样式来自内置模板。
-用户手册目录在 `soffice` 与 `pypdf` 可用时自动核准页码；设计说明书目录在本机 Word 可用时自动更新。未自动更新时须在 Word 中更新目录并核对页码。正式交付只包含 Word 文档，不生成 PDF。
+输出 `正式资料/申请表信息.txt`、`<软件全称>-V1.0.0-源程序鉴别材料.docx`、`<软件全称>_用户手册.docx` 和 `<软件全称>-V1.0.0-软件设计说明书.docx`。用户手册封面、目录与正文由已确认的软件名称和版本号生成；设计说明书首页标题为“<软件全称>软件说明书”（宋体一号），版本号为 Times New Roman 二号。
+用户手册目录在 `soffice` 与 `pypdf` 可用时自动核准页码；设计说明书目录在本机 Word 可用时自动更新。未自动更新时须在 Word 中更新目录并核对页码。正式交付包含一份 TXT 和三份 DOCX，不生成 PDF。
 
 ### 10. 程序化验证与交付
 

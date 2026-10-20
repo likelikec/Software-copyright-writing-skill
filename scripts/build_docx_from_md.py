@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build final DOCX files from confirmed Markdown drafts."""
+"""Build the final application TXT and three DOCX files from confirmed drafts."""
 
 from __future__ import annotations
 
@@ -78,35 +78,15 @@ def application_software_name(draft_dir: Path) -> str:
     return name
 
 
-def write_application_docx(draft_dir: Path, out_dir: Path) -> tuple[Path | None, list[str]]:
+def write_application_txt(draft_dir: Path, out_dir: Path) -> tuple[Path | None, list[str]]:
     md_path = draft_dir / "申请表信息.md"
     if not md_path.exists():
         return None, ["缺少草稿/申请表信息.md"]
-    if not DOCX_AVAILABLE:
-        raise RuntimeError("申请表 Word 生成需要 python-docx")
     fields, warnings = parse_application_lines(md_path)
     if not fields:
-        raise RuntimeError("申请表草稿缺少 ➤字段：无法生成申请表信息.docx")
-    out_path = out_dir / "申请表信息.docx"
-    document = Document()
-    configure_a4(document)
-    set_normal_font(document, "SimSun", 10.5)
-    title = document.add_paragraph(style="Title")
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title.add_run("软件著作权登记申请表信息")
-    set_run_font(title_run, "SimSun", 18)
-    title_run.font.bold = True
-    for field in fields:
-        paragraph = document.add_paragraph()
-        paragraph.paragraph_format.space_after = Pt(7)
-        paragraph.paragraph_format.line_spacing = 1.35
-        label, sep, value = field.partition("：")
-        label_run = paragraph.add_run(f"{label}{sep}")
-        set_run_font(label_run, "SimSun", 10.5)
-        label_run.font.bold = True
-        value_run = paragraph.add_run(value)
-        set_run_font(value_run, "SimSun", 10.5)
-    document.save(out_path)
+        raise RuntimeError("申请表草稿缺少 ➤字段：无法生成申请表信息.txt")
+    out_path = ensure_dir(out_dir) / "申请表信息.txt"
+    out_path.write_text("\n".join(fields) + "\n", encoding="utf-8")
     return out_path, warnings
 
 
@@ -1362,6 +1342,8 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
     final_dir = ensure_dir(workdir / "正式资料")
     app_name = application_software_name(draft_dir)
     app_version = application_version(draft_dir)
+    if app_version != "V1.0.0":
+        raise RuntimeError("申请表草稿的版本号必须为 V1.0.0；请重新生成并确认申请表信息")
     final_software_name = app_name or software_name
     final_version = app_version or version
     safe_name = safe_filename(final_software_name)
@@ -1383,9 +1365,9 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
         if not screenshots:
             warnings.append("用户手册截图清单为空，用户手册应保留截图预留位置")
 
-    app_docx, app_warnings = write_application_docx(draft_dir, final_dir)
-    if app_docx:
-        outputs.append(app_docx)
+    app_txt, app_warnings = write_application_txt(draft_dir, final_dir)
+    if app_txt:
+        outputs.append(app_txt)
     warnings.extend(app_warnings)
 
     code_specs, code_spec_warnings = resolve_code_specs(draft_dir, safe_name, safe_filename(final_version))
@@ -1487,7 +1469,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workdir", default="软件著作权申请资料")
     parser.add_argument("--software-name", required=True)
-    parser.add_argument("--version", default="V1.0")
+    parser.add_argument("--version", default="V1.0.0")
     args = parser.parse_args()
 
     workdir = Path(args.workdir)

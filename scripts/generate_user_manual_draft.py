@@ -291,7 +291,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--analysis", required=True)
     parser.add_argument("--software-name", required=True)
-    parser.add_argument("--version", default="V1.0")
+    parser.add_argument("--version", default="V1.0.0")
     parser.add_argument("--business-context", required=True)
     parser.add_argument("--out-dir", default="软件著作权申请资料/草稿")
     args = parser.parse_args()

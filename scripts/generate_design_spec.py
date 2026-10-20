@@ -18,6 +18,7 @@ try:
     from docx import Document
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Pt
 except Exception as exc:  # pragma: no cover - environment gate handles this
     Document = None  # type: ignore[assignment]
     OxmlElement = None  # type: ignore[assignment]
@@ -146,7 +147,10 @@ def replace_text_in_runs(paragraph: Any, replacements: dict[str, str]) -> None:
     combined = "".join(run.text or "" for run in runs)
     updated = combined
     for old, new in replacements.items():
-        updated = updated.replace(old, new)
+        if old == "V1.0":
+            updated = re.sub(r"(?<!\w)V1\.0(?:\.0)?(?![.\d])", new, updated)
+        else:
+            updated = updated.replace(old, new)
     if updated == combined:
         return
     # 封面版本号在模板里分散于多个 run；保留首个 run 的字符样式和段落格式。
@@ -171,6 +175,25 @@ def replace_template_identity(document: Any, software_name: str, version: str) -
         for container in (section.header, section.first_page_header, section.footer, section.first_page_footer):
             for paragraph in container.paragraphs:
                 replace_text_in_runs(paragraph, replacements)
+
+
+def format_design_cover(document: Any, software_name: str, version: str) -> None:
+    title = next((p for p in document.paragraphs if p.text.strip() in {software_name, f"{software_name}软件说明书"}), None)
+    subtitle = next((p for p in document.paragraphs if p.text.strip() == "系统设计说明书"), None)
+    version_paragraph = next((p for p in document.paragraphs if p.text.strip() == version), None)
+    if title is None or version_paragraph is None:
+        raise RuntimeError("设计说明书模板封面缺少标题或版本号")
+    title.clear()
+    title_run = title.add_run(f"{software_name}软件说明书")
+    title_run.font.name = "宋体"
+    title_run.font.size = Pt(26)  # 一号
+    title_run._element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), "宋体")
+    if subtitle is not None:
+        subtitle._element.getparent().remove(subtitle._element)
+    version_paragraph.clear()
+    version_run = version_paragraph.add_run(version)
+    version_run.font.name = "Times New Roman"
+    version_run.font.size = Pt(22)  # 二号
 
 
 def clear_template_content_after_toc(document: Any) -> None:
@@ -408,6 +431,7 @@ def generate_design_docx(
     shutil.copy2(template, output)
     document = Document(str(output))
     replace_template_identity(document, software_name, version)
+    format_design_cover(document, software_name, version)
     clear_template_content_after_toc(document)
     document.add_page_break()
     add_design_content(document, business)
@@ -423,7 +447,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--business-context", required=True)
     parser.add_argument("--software-name", required=True)
-    parser.add_argument("--version", default="V1.0")
+    parser.add_argument("--version", default="V1.0.0")
     parser.add_argument("--template", default="")
     parser.add_argument("--out-dir", default="软件著作权申请资料/草稿")
     parser.add_argument("--draft-only", action="store_true", help="只生成供用户确认的 Markdown 草稿")

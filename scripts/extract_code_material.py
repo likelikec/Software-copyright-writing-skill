@@ -910,7 +910,7 @@ def main() -> None:
     parser.add_argument("--project", required=True)
     parser.add_argument("--analysis", help="Optional project analysis JSON; retained for workflow traceability")
     parser.add_argument("--software-name", required=True)
-    parser.add_argument("--version", default="V1.0")
+    parser.add_argument("--version", default="V1.0.0")
     parser.add_argument("--out-dir", default="软件著作权申请资料/草稿")
     parser.add_argument("--lines-per-page", type=int, default=LINES_PER_PAGE)
     parser.add_argument("--selection", help="Editable JSON file created by propose_code_selection.py")

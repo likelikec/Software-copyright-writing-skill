@@ -31,7 +31,7 @@
   <text class="title" x="40" y="34">程序鉴别材料</text>
   <text class="note" x="40" y="52">前 30 页 + 后 30 页，共 60 页</text>
   <rect class="card" x="40" y="66" width="250" height="330" rx="4"/>
-  <text class="head" x="56" y="88">软件全称 V1.0</text>
+  <text class="head" x="56" y="88">软件全称 V1.0.0</text>
   <text class="head" x="274" y="88" text-anchor="end">第 1 页</text>
   <line class="rule" x1="56" y1="96" x2="274" y2="96"/>
   <text class="mono" x="56" y="114">// File: main.js</text>
@@ -58,7 +58,7 @@
   <text class="title" x="330" y="34">文档鉴别材料（用户手册）</text>
   <text class="note" x="330" y="52">固定五章，正文依据项目证据撰写</text>
   <rect class="card" x="330" y="66" width="250" height="330" rx="4"/>
-  <text class="head" x="346" y="88">软件全称 V1.0</text>
+  <text class="head" x="346" y="88">软件全称 V1.0.0</text>
   <text class="head" x="564" y="88" text-anchor="end">第 6 页</text>
   <line class="rule" x1="346" y1="96" x2="564" y2="96"/>
   <text class="title" x="346" y="118">三、软件使用说明</text>
@@ -83,7 +83,7 @@
   <rect class="card" x="620" y="66" width="300" height="330" rx="4"/>
   <text class="body" x="636" y="92">软件全称</text><text class="mono" x="904" y="92" text-anchor="end">某协作看板系统</text>
   <line class="rule" x1="636" y1="102" x2="904" y2="102"/>
-  <text class="body" x="636" y="122">版本号 / 软件分类</text><text class="mono" x="904" y="122" text-anchor="end">V1.0 / 应用软件</text>
+  <text class="body" x="636" y="122">版本号 / 软件分类</text><text class="mono" x="904" y="122" text-anchor="end">V1.0.0 / 应用软件</text>
   <line class="rule" x1="636" y1="132" x2="904" y2="132"/>
   <text class="body" x="636" y="152">开发完成日期</text><text class="mono" x="904" y="152" text-anchor="end">YYYY-MM-DD</text>
   <line class="rule" x1="636" y1="162" x2="904" y2="162"/>

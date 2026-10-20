@@ -38,7 +38,7 @@ def check_environment(skill_dir: Path) -> dict[str, Any]:
     final_docx_mode = "python-docx" if python_docx else "unavailable"
     requires_user_input = not python_docx
     next_action = (
-        "四类 Word 材料需要 python-docx。请安装 python-docx（pip install python-docx），重新运行环境检查，再继续生成材料。"
+        "三类 Word 材料需要 python-docx。请安装 python-docx（pip install python-docx），重新运行环境检查，再继续生成材料。"
         if requires_user_input
         else "DOCX 生成环境可用，可进入项目分析。"
     )
@@ -46,7 +46,7 @@ def check_environment(skill_dir: Path) -> dict[str, Any]:
         "output_directory": "当前目录/软件著作权申请资料",
         "capabilities": {
             "markdown_drafts": True,
-            "application_docx": python_docx,
+            "application_txt": True,
             "code_docx": python_docx,
             "user_manual_docx": python_docx,
             "design_docx": python_docx,
@@ -60,7 +60,7 @@ def check_environment(skill_dir: Path) -> dict[str, Any]:
         },
         "final_docx_mode": final_docx_mode,
         "recommendation": (
-            "python-docx 可用，可生成四类 Word 文档。"
+            "python-docx 可用，可生成三类 Word 文档和申请表 TXT。"
             if python_docx
             else "python-docx 不可用，须先安装 python-docx（pip install python-docx）。"
         ),
@@ -86,12 +86,13 @@ def write_markdown(path: Path, data: dict[str, Any]) -> None:
         "## 能力状态",
         "",
         f"- Markdown 草稿：{'可用' if caps['markdown_drafts'] else '不可用'}",
-        f"- 四类 Word 文档：{'可用' if caps['python_docx'] else '不可用'}",
+        f"- 申请表 TXT：可用",
+        f"- 三类 Word 文档：{'可用' if caps['python_docx'] else '不可用'}",
         f"- python-docx：{'可用' if caps['python_docx'] else '不可用'}",
         f"- 用户手册目录自动核页（soffice + pypdf）：{'可用' if caps['manual_toc_auto'] else '不可用，需在 Word 中更新目录'}",
         f"- 操作视频抽帧（ffmpeg + ffprobe）：{'可用' if caps['operation_video_frames'] else '不可用'}（ffmpeg: {data['versions']['ffmpeg']}；ffprobe: {data['versions']['ffprobe']}）",
         "",
-        "代码鉴别材料使用 Courier New 六号字；用户手册目录可借助 soffice 与 pypdf 自动核页，设计说明书目录在 Word 可用时更新。正式资料只生成 DOCX。",
+        "代码鉴别材料使用 Courier New 六号字；用户手册目录可借助 soffice 与 pypdf 自动核页，设计说明书目录在 Word 可用时更新。正式资料包含申请表 TXT 和三类 DOCX。",
         "",
         "操作视频抽帧能力仅在用户选择提供操作视频时需要。不提供视频不影响后续流程；用户手册截图只整理用户截图目录的图片。",
         "",
