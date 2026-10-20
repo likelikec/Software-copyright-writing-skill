@@ -597,8 +597,45 @@ def check_placeholder_residue(
             f"{check_name} / 用户手册截图占位",
             "FAIL",
             f"用户手册正文含有截图占位字样 {placeholder_terms}，但 截图方式确认.json 的 screenshot_method="
-            f"{screenshot_method!r}，不是允许的 user-supplied 或 skip",
+            f"{screenshot_method!r}；generated-ui 模式须补全示意截图，其他方式须为 user-supplied 或 skip",
         )
+
+
+def check_generated_ui_evidence(workdir: Path, manual_docx: Path | None) -> None:
+    check_name = "生成界面示意图溯源"
+    confirmation = workdir / "截图方式确认.json"
+    if not confirmation.is_file() or read_json(confirmation).get("screenshot_method") != "generated-ui":
+        return
+    manifest_path = workdir / "截图" / "截图清单.json"
+    if not manifest_path.is_file():
+        record(check_name, "FAIL", "选择了 generated-ui，但缺少截图清单")
+        return
+    manifest = read_json(manifest_path)
+    items = manifest.get("screenshots")
+    project = (workdir / str(manifest.get("project_root") or "")).resolve()
+    if manifest.get("method") != "generated-ui" or not isinstance(items, list) or not items or not manifest.get("project_root") or not project.is_dir():
+        record(check_name, "FAIL", "截图清单缺少 generated-ui 方法、图片或项目目录")
+        return
+    manual_text = docx_body_text(manual_docx) if manual_docx else ""
+    problems = []
+    for index, item in enumerate(items, start=1):
+        caption = str(item.get("caption") or "")
+        image = (workdir / str(item.get("path") or "")).resolve()
+        html = (workdir / str(item.get("source_html") or "")).resolve()
+        evidence = item.get("evidence")
+        if "界面示意" not in caption or "非实际运行截图" not in caption or caption not in manual_text:
+            problems.append(f"第 {index} 图注未在手册中明确标识示意性质")
+        if not image.is_relative_to((workdir / "截图").resolve()) or not image.is_file() or image.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+            problems.append(f"第 {index} 图片不存在或不是 PNG")
+        if not html.is_file() or not html.resolve().is_relative_to((workdir / "草稿" / "界面示意").resolve()):
+            problems.append(f"第 {index} HTML 来源无效")
+        if not isinstance(evidence, list) or not evidence or any(
+            not (project / str(path)).resolve().is_relative_to(project.resolve())
+            or not (project / str(path)).is_file()
+            for path in (evidence or [])
+        ):
+            problems.append(f"第 {index} 项目功能证据无效")
+    record(check_name, "FAIL" if problems else "PASS", "；".join(problems) if problems else f"{len(items)} 张示意图、HTML、项目证据及手册图注均可核对")
 
 
 MANUAL_HEADING_RE = re.compile(r"^\s*(?:\d+\.\s*|[零一二三四五六七八九十百]+、\s*)(.+?)\s*$")
@@ -858,8 +895,8 @@ def check_gates(workdir: Path) -> None:
             record(sub_check, "FAIL", f"{path} 存在但无法解析为 JSON：{exc}")
             continue
         value = data.get(key)
-        if stage == "screenshot-method" and data.get("screenshot_method") not in {"user-supplied", "skip"}:
-            record(sub_check, "FAIL", f"截图方式必须为 user-supplied 或 skip，实际为 {data.get('screenshot_method')!r}")
+        if stage == "screenshot-method" and data.get("screenshot_method") not in {"user-supplied", "generated-ui", "skip"}:
+            record(sub_check, "FAIL", f"截图方式必须为 user-supplied、generated-ui 或 skip，实际为 {data.get('screenshot_method')!r}")
         elif value:
             record(sub_check, "PASS", f"{path} 已记录 {key}={value!r}")
         else:
@@ -904,6 +941,7 @@ def main() -> int:
     check_naming_consistency(app_fields, code_docx, manual_docx, design_docx)
     check_page_count(app_fields, code_docx)
     check_placeholder_residue(workdir, app_txt, manual_docx, app_fields)
+    check_generated_ui_evidence(workdir, manual_docx)
     check_fabricated_phrases(workdir, manual_docx, app_txt)
     check_screenshot_dimensions(manual_docx)
     check_field_lengths(app_fields)

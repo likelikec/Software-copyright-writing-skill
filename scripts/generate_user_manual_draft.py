@@ -62,6 +62,20 @@ def required_text(item: dict[str, Any], field: str, title: str) -> str:
 
 
 def normalize_screenshots(raw: Any, workdir: Path, title: str) -> list[dict[str, str]]:
+    manifest_path = workdir / "截图" / "截图清单.json"
+    if manifest_path.is_file():
+        manifest = read_json(manifest_path)
+        if manifest.get("method") == "generated-ui":
+            matched = []
+            for item in manifest.get("screenshots", []):
+                if item.get("module") != title:
+                    continue
+                image = workdir / str(item.get("path") or "")
+                if image.is_file() and image.resolve().is_relative_to((workdir / "截图").resolve()):
+                    relative = image.resolve().relative_to(workdir.resolve())
+                    matched.append({"path": str(Path("..") / relative), "caption": str(item.get("caption") or f"{title}界面示意")})
+            if matched:
+                return matched
     values = raw if isinstance(raw, list) else ([raw] if raw else [])
     result: list[dict[str, str]] = []
     for value in values:

@@ -9,7 +9,7 @@ metadata:
   short-description: 生成并校验中国软件著作权申请材料
   author: suling-fun
   maintainer: likelikec
-  version: "5.2.0"
+  version: "5.3.0"
   repository: https://github.com/likelikec/Software-copyright-writing-skill
   upstream: https://github.com/Fokkyp/SoftwareCopyright-Skill
   upstream-version: "1.3"
@@ -18,14 +18,14 @@ metadata:
 
 # 软著申请资料生成
 
-本 skill 只负责阅读真实项目、生成草稿与正式 DOCX、整理用户截图和执行程序化验证。材料生成与验证完成后流程结束。
+本 skill 只负责阅读真实项目、生成草稿与正式 DOCX、整理或生成用户手册插图和执行程序化验证。材料生成与验证完成后流程结束。
 
 ## 运行环境
 
 - Python 3.10 或更高版本；优先使用当前项目的相对路径 `.venv/bin/python`（若存在），否则使用 `python3`。
 - `python-docx` 是代码、用户手册和设计说明书三类 Word 材料生成的必需依赖；申请表信息输出 TXT。
 - `soffice` 与 `pypdf` 可自动核准用户手册目录页码；缺失时生成后须在 Word 中更新目录并核对页码。
-- 用户手册截图只接受用户放入 `用户截图/` 的 PNG/JPG/JPEG/WebP；本 skill 不启动项目或自动截取页面。
+- 用户手册插图优先使用用户截图及用户文档/PPT 中可核实的界面截图；均无可用图片时，可经用户选择生成简洁静态界面示意图，截图需有真实功能证据。该选项需要 Chrome、Chromium 或 Edge。
 
 所有命令中的 `${SKILL_DIR}` 指本文件所在目录的绝对路径。开始前执行：
 
@@ -56,7 +56,7 @@ python3 ${SKILL_DIR}/scripts/confirm_stage.py \
   --workdir 软件著作权申请资料 --stage <阶段名> --note "<用户确认内容>"
 ```
 
-截图方式固定为 `user-supplied`；本次不提供图片时可以记录为 `skip`。
+先检查项目现有截图、用户提供的截图及文档/PPT。无可用截图时，询问用户在 `generated-ui`（生成简单界面示意图）和 `skip`（保留截图预留位）之间选择；有可用截图时记录 `user-supplied`。不得把生成的示意图称为实际运行截图。
 
 ## 工作流
 
@@ -122,23 +122,33 @@ python3 ${SKILL_DIR}/scripts/confirm_stage.py \
 
 确认后运行 `extract_code_material.py` 生成代码 Markdown。代码材料必须来自用户确认的真实源码文件。
 
-### 6. 用户截图
+### 6. 用户手册插图
 
-记录截图方式：
+先核对项目截图、`用户截图/`，以及用户提供文档/PPT 中是否有可复用的真实界面截图。提取文档/PPT 图片时保留原文件和页码/幻灯片号作为来源。找不到可用图片时，向用户提供“生成简单界面示意图”和“暂不配图”两个选项，并说明示意图依据代码功能制作，不代表软件实际运行界面。记录用户选择：
 
 ```bash
 python3 ${SKILL_DIR}/scripts/confirm_stage.py \
   --workdir 软件著作权申请资料 --stage screenshot-method \
-  --method <user-supplied|skip> --note "<用户选择>"
+  --method <user-supplied|generated-ui|skip> --note "<用户选择>"
 ```
 
-用户选择 `user-supplied` 时将图片放入 `软件著作权申请资料/用户截图/`，再运行：
+选择 `user-supplied` 时，将用户截图或从文档/PPT 提取并核对的图片放入 `软件著作权申请资料/用户截图/`，再运行：
 
 ```bash
 python3 ${SKILL_DIR}/scripts/capture_screenshots.py \
   --manual-dir 软件著作权申请资料/用户截图 \
   --out-dir 软件著作权申请资料/截图
 ```
+
+选择 `generated-ui` 时，只为第 3 章确实需要图示且无真实截图的功能制作简洁静态 HTML。每张图须列出项目源码或配置的证据路径，不编造项目没有的功能、数据、按钮或运行状态。把 HTML 和 `截图方案.json` 放在 `草稿/界面示意/`；方案格式为 `{"screenshots":[{"module":"与 manual_modules.title 完全一致","html":"草稿/界面示意/功能.html","caption":"功能界面示意","evidence":["相对项目根目录的源码路径"]}]}`。运行：
+
+```bash
+python3 ${SKILL_DIR}/scripts/capture_generated_ui.py \
+  --workdir 软件著作权申请资料 --project <项目目录> \
+  --plan 软件著作权申请资料/草稿/界面示意/截图方案.json
+```
+
+截图脚本把 PNG 和来源清单写入 `截图/`。手册图注必须保留“界面示意，非实际运行截图”字样。用户选 `skip` 时保留截图预留位。
 
 ### 7. 用户手册与设计说明书草稿
 
@@ -161,7 +171,7 @@ python3 ${SKILL_DIR}/scripts/generate_design_spec.py \
   --out-dir 软件著作权申请资料/草稿 --draft-only
 ```
 
-设计说明书正文必须包括背景、系统架构设计（含架构、接口、数据库及项目需要的后续小节）、系统功能概述、系统关键用例描述、典型流程与应用场景。系统功能概述的每个小节按 [references/business_understanding_rules.md](references/business_understanding_rules.md) 写足职责、入口、输入、处理、结果和边界等有证据的细节。正式 DOCX 由第 9 步在 Markdown 确认后生成，模板为 `assets/design_spec_template.docx`。
+设计说明书正文必须包括背景、系统架构设计（含架构、接口、数据库及项目需要的后续小节）、系统功能概述、系统关键用例描述、典型流程与应用场景。系统功能概述先总览功能域和协作链路，再按 [references/business_understanding_rules.md](references/business_understanding_rules.md) 为每个功能域写通常 4–6 段有证据的正文：定位与入口、输入和约束、核心处理与状态变化、输出与下游衔接、异常和边界。复杂度决定篇幅，不用套话凑字数，也不编造未实现的机制。正式 DOCX 由第 9 步在 Markdown 确认后生成，模板为 `assets/design_spec_template.docx`。
 
 ### 8. Markdown 草稿确认
 

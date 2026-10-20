@@ -124,6 +124,10 @@ def confirmation_issues(workdir: Path) -> list[str]:
     screenshot = read_json_if_exists(workdir / "截图方式确认.json")
     if not screenshot.get("screenshot_method_confirmed"):
         issues.append("截图方式尚未确认：须先选定截图方式，再记录 `screenshot-method` 确认点")
+    elif screenshot.get("screenshot_method") == "generated-ui":
+        manifest = read_json_if_exists(workdir / "截图" / "截图清单.json")
+        if manifest.get("method") != "generated-ui" or not manifest.get("screenshots"):
+            issues.append("已选择生成界面示意图，但截图清单缺失或为空；须先运行 capture_generated_ui.py")
 
     app_md = draft_dir / "申请表信息.md"
     if app_md.exists():
@@ -1358,6 +1362,8 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
     screenshot_manifest = workdir / "截图/截图清单.json"
     if screenshot_method == "skip":
         warnings.append("用户选择暂不截图，用户手册已保留截图预留位置")
+    elif screenshot_method == "generated-ui":
+        warnings.append("用户手册采用由真实功能证据生成的界面示意图；图注须标明非实际运行截图")
     elif screenshot_method and not screenshot_manifest.exists():
         warnings.append("用户手册截图未生成或未插入，用户手册应保留截图预留位置")
     elif screenshot_manifest.exists():

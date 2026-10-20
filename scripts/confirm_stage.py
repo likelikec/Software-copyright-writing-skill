@@ -14,7 +14,7 @@ from common import read_json, write_json
 MAIN_FUNCTION_MIN_CHARS = 500
 MAIN_FUNCTION_MAX_CHARS = 1300
 
-SCREENSHOT_METHODS = ["user-supplied", "skip"]
+SCREENSHOT_METHODS = ["user-supplied", "generated-ui", "skip"]
 
 
 def timestamp() -> str:
@@ -120,15 +120,19 @@ def confirm_code_selection(workdir: Path, note: str) -> Path:
 
 
 def parse_screenshot_method(method: str, note: str) -> str:
-    """只接受用户提供截图或本次跳过截图。"""
+    """记录用户选择的真实截图、简洁界面示意图或跳过方式。"""
     value = (method or note or "").lower()
+    if value in SCREENSHOT_METHODS:
+        return value
     if any(key in value for key in ("skip", "no-screenshot", "none", "不截图", "跳过", "暂不", "先不", "不要截图", "无需截图")):
         return "skip"
+    if any(key in value for key in ("generated-ui", "生成界面", "界面示意", "示意图", "生成截图")):
+        return "generated-ui"
     if any(key in value for key in ("user", "manual", "self", "手动", "自己", "用户")):
         return "user-supplied"
     raise SystemExit(
         "STOP_FOR_USER\n"
-        "NEXT_ACTION: 截图方式固定为 user-supplied；若本次暂不提供截图可使用 skip。"
+        "NEXT_ACTION: 截图方式须从 user-supplied、generated-ui、skip 中选择。"
     )
 
 
