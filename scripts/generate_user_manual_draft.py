@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from common import ensure_dir, read_json
+from common import ensure_dir, manual_image_caption, read_json
 
 
 TOP_LEVEL_TITLES = [
@@ -73,7 +73,8 @@ def normalize_screenshots(raw: Any, workdir: Path, title: str) -> list[dict[str,
                 image = workdir / str(item.get("path") or "")
                 if image.is_file() and image.resolve().is_relative_to((workdir / "截图").resolve()):
                     relative = image.resolve().relative_to(workdir.resolve())
-                    matched.append({"path": str(Path("..") / relative), "caption": str(item.get("caption") or f"{title}界面示意")})
+                    caption = manual_image_caption(str(item.get("caption") or ""), title)
+                    matched.append({"path": str(Path("..") / relative), "caption": caption})
             if matched:
                 return matched
     values = raw if isinstance(raw, list) else ([raw] if raw else [])

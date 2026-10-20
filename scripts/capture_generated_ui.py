@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from capture_screenshots import reserved_names, safe_name, unique_target
-from common import ensure_dir, read_json, write_json
+from common import ensure_dir, manual_image_caption, read_json, write_json
 
 
 def browser_executable(explicit: str) -> str:
@@ -76,8 +76,7 @@ def validate_plan(plan: dict[str, Any], workdir: Path, project: Path) -> list[di
             if not path.is_file():
                 raise ValueError(f"项目证据不存在：{path}")
             evidence_paths.append(str(relative))
-        if "界面示意" not in caption:
-            caption = f"{caption or module + '功能界面'}（界面示意，非实际运行截图）"
+        caption = manual_image_caption(caption, module)
         result.append({"module": module, "caption": caption, "html": html, "evidence": evidence_paths})
     return result
 

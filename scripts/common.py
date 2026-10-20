@@ -256,6 +256,14 @@ def read_json(path: Path) -> dict[str, Any]:
     return json.loads(read_text(path))
 
 
+def manual_image_caption(value: str, module: str) -> str:
+    """Keep only the function/page name in a user-manual figure caption."""
+    caption = str(value or "")
+    caption = caption.replace("（界面示意，非实际运行截图）", "")
+    caption = caption.replace("界面示意", "界面").replace("非实际运行截图", "")
+    return caption.strip("，,（）() ") or f"{module}页面"
+
+
 def write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

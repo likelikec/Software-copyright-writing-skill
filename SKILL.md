@@ -9,7 +9,7 @@ metadata:
   short-description: 生成并校验中国软件著作权申请材料
   author: suling-fun
   maintainer: likelikec
-  version: "5.3.0"
+  version: "5.3.1"
   repository: https://github.com/likelikec/Software-copyright-writing-skill
   upstream: https://github.com/Fokkyp/SoftwareCopyright-Skill
   upstream-version: "1.3"
@@ -140,7 +140,7 @@ python3 ${SKILL_DIR}/scripts/capture_screenshots.py \
   --out-dir 软件著作权申请资料/截图
 ```
 
-选择 `generated-ui` 时，只为第 3 章确实需要图示且无真实截图的功能制作简洁静态 HTML。每张图须列出项目源码或配置的证据路径，不编造项目没有的功能、数据、按钮或运行状态。把 HTML 和 `截图方案.json` 放在 `草稿/界面示意/`；方案格式为 `{"screenshots":[{"module":"与 manual_modules.title 完全一致","html":"草稿/界面示意/功能.html","caption":"功能界面示意","evidence":["相对项目根目录的源码路径"]}]}`。运行：
+选择 `generated-ui` 时，只为第 3 章确实需要图示且无真实截图的功能制作简洁静态 HTML。每张图须列出项目源码或配置的证据路径，不编造项目没有的功能、数据、按钮或运行状态。把 HTML 和 `截图方案.json` 放在 `草稿/界面示意/`；方案格式为 `{"screenshots":[{"module":"与 manual_modules.title 完全一致","html":"草稿/界面示意/功能.html","caption":"功能页面","evidence":["相对项目根目录的源码路径"]}]}`。运行：
 
 ```bash
 python3 ${SKILL_DIR}/scripts/capture_generated_ui.py \
@@ -148,7 +148,7 @@ python3 ${SKILL_DIR}/scripts/capture_generated_ui.py \
   --plan 软件著作权申请资料/草稿/界面示意/截图方案.json
 ```
 
-截图脚本把 PNG 和来源清单写入 `截图/`。手册图注必须保留“界面示意，非实际运行截图”字样。用户选 `skip` 时保留截图预留位。
+截图脚本把 PNG 和来源清单写入 `截图/`。用户手册图注只写功能或页面名称，不写图片的生成方式；生成方式、HTML 和源码证据保留在截图清单与草稿中。用户选 `skip` 时保留截图预留位。
 
 ### 7. 用户手册与设计说明书草稿
 

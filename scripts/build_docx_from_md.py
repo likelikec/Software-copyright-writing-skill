@@ -1363,7 +1363,7 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
     if screenshot_method == "skip":
         warnings.append("用户选择暂不截图，用户手册已保留截图预留位置")
     elif screenshot_method == "generated-ui":
-        warnings.append("用户手册采用由真实功能证据生成的界面示意图；图注须标明非实际运行截图")
+        warnings.append("用户手册采用依据真实功能证据生成的界面图片；生成方式、HTML 与证据见截图清单，图注仅写功能或页面名称")
     elif screenshot_method and not screenshot_manifest.exists():
         warnings.append("用户手册截图未生成或未插入，用户手册应保留截图预留位置")
     elif screenshot_manifest.exists():

@@ -34,7 +34,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from common import read_json, safe_filename
+from common import manual_image_caption, read_json, safe_filename
 
 try:
     # Reuse the exact 有效字符数 (whitespace/newline-stripped length) algorithm
@@ -619,12 +619,12 @@ def check_generated_ui_evidence(workdir: Path, manual_docx: Path | None) -> None
     manual_text = docx_body_text(manual_docx) if manual_docx else ""
     problems = []
     for index, item in enumerate(items, start=1):
-        caption = str(item.get("caption") or "")
+        caption = manual_image_caption(str(item.get("caption") or ""), str(item.get("module") or "功能"))
         image = (workdir / str(item.get("path") or "")).resolve()
         html = (workdir / str(item.get("source_html") or "")).resolve()
         evidence = item.get("evidence")
-        if "界面示意" not in caption or "非实际运行截图" not in caption or caption not in manual_text:
-            problems.append(f"第 {index} 图注未在手册中明确标识示意性质")
+        if caption not in manual_text or "界面示意" in manual_text or "非实际运行截图" in manual_text:
+            problems.append(f"第 {index} 图注缺失、含生成方式说明，或未出现在手册中")
         if not image.is_relative_to((workdir / "截图").resolve()) or not image.is_file() or image.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
             problems.append(f"第 {index} 图片不存在或不是 PNG")
         if not html.is_file() or not html.resolve().is_relative_to((workdir / "草稿" / "界面示意").resolve()):
