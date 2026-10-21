@@ -2,14 +2,14 @@
 name: software-copyright-materials
 description: >
   从真实项目生成并校验中国计算机软件著作权登记材料，包括申请表信息、代码鉴别材料、
-  五章用户手册和软件设计说明书。Generate reviewable DOCX materials from a real
+  八章用户手册和十章软件设计说明书（各60页）。Generate reviewable DOCX materials from a real
   software project. 不适用于专利、商标及非软件类作品著作权登记。
 license: MIT
 metadata:
   short-description: 生成并校验中国软件著作权申请材料
   author: suling-fun
   maintainer: likelikec
-  version: "5.3.1"
+  version: "6.0.0"
   repository: https://github.com/likelikec/Software-copyright-writing-skill
   upstream: https://github.com/Fokkyp/SoftwareCopyright-Skill
   upstream-version: "1.3"
@@ -24,7 +24,7 @@ metadata:
 
 - Python 3.10 或更高版本；优先使用当前项目的相对路径 `.venv/bin/python`（若存在），否则使用 `python3`。
 - `python-docx` 是代码、用户手册和设计说明书三类 Word 材料生成的必需依赖；申请表信息输出 TXT。
-- `soffice` 与 `pypdf` 可自动核准用户手册目录页码；缺失时生成后须在 Word 中更新目录并核对页码。
+- Microsoft Word 或 `soffice` 与 `pypdf` 用于重新排版并核对两份文档各60页；缺少排版引擎时不能通过页数验收。`soffice` 与 `pypdf` 还可核准用户手册目录页码。
 - 用户手册插图优先使用用户截图及用户文档/PPT 中可核实的界面截图；均无可用图片时，可经用户选择生成简洁静态界面示意图，截图需有真实功能证据。该选项需要 Chrome、Chromium 或 Edge。
 
 所有命令中的 `${SKILL_DIR}` 指本文件所在目录的绝对路径。开始前执行：
@@ -40,10 +40,11 @@ test -f "${SKILL_DIR}/scripts/check_environment.py"
 - 脚本只负责证据收集、字段校验、排版、装配和验证；模型负责行业判断、功能理解和所有叙述性正文。
 - 申请表不包含“软件简称”。“开发目的”从宏观真实场景说明用途；“软件的技术特点”在 100 字内尽量具体说明技术机制和差异化特点。
 - 申请表的本次默认申报口径详见 [references/application_fields.md](references/application_fields.md)：原创、未发表、著作权人南京大学、全部权利、原始取得及用户指定的硬件和开发环境。编程语言、全量源程序量和额外支持软件仍根据项目证据填写；正式生成前核对固定值是否适用于目标项目。
-- 用户手册固定五章：系统功能概述、软件安装与配置、软件使用说明、典型使用流程总结、使用注意事项与常见问题。
+- 用户手册固定八章，按使用者完成任务组织内容，章节与分章预算见 [references/user_manual_structure.md](references/user_manual_structure.md)。
 - 代码 Word 命名为 `<软件全称>-<版本号>-源程序鉴别材料.docx`；正文使用 Courier New 六号字（7.5 磅），长行在保留源码字符的前提下换行，超出单页容量时停止生成。
-- 用户手册第一页为宋体一号居中封面，第二页为五章目录，正文从第三页开始。
-- 软件设计说明书使用内置模板的首页、目录和样式，正文由模型依据项目证据撰写，输出完整 DOCX。
+- 用户手册第一页为宋体一号居中封面，第二页为八章目录，正文从第三页开始。
+- 软件设计说明书固定十章，使用内置模板首页和样式，第二页目录只列一级章节；展开要求见 [references/design_spec_structure.md](references/design_spec_structure.md)。
+- 用户手册与软件设计说明书各恰好60页，含封面1页、目录1页、正文58页。保持既定字号、行距和页边距，以真实内容扩写和去重调整，禁止空白页、重复段落、拉伸图片凑页；不能用分页符或文档缓存页数代替排版核验。
 - 正式材料统一使用用户已确认的“软件全称”；本次申请表版本号固定为 `V1.0.0`，其余材料与之保持一致。
 - 创建任何文件前先读取 [references/output_directory_rules.md](references/output_directory_rules.md)。
 
@@ -91,7 +92,7 @@ python3 ${SKILL_DIR}/scripts/generate_business_context.py \
   --out-dir 软件著作权申请资料/草稿
 ```
 
-模型阅读证据和必要源码后生成 `草稿/业务理解.json`，至少补全申请表字段、用户手册五章字段和设计说明书五部分字段。字段契约详见 [references/business_understanding_rules.md](references/business_understanding_rules.md)。生成后停止，确认 `business` 后继续。
+模型阅读证据和必要源码后先写 `草稿/文档内容规划.md`，列出两份文档的子节、证据、图表、案例和58页正文预算，再生成 `草稿/业务理解.json`，补全申请表、八章用户手册和十章设计说明书字段。字段契约详见 [references/business_understanding_rules.md](references/business_understanding_rules.md)，两份结构规范均须在撰写前读取。旧五章稿须补全新字段并重新确认，不自动覆盖既有正式材料。生成后停止，确认 `business` 后继续。
 
 ### 4. 申请表信息
 
@@ -140,7 +141,7 @@ python3 ${SKILL_DIR}/scripts/capture_screenshots.py \
   --out-dir 软件著作权申请资料/截图
 ```
 
-选择 `generated-ui` 时，只为第 3 章确实需要图示且无真实截图的功能制作简洁静态 HTML。每张图须列出项目源码或配置的证据路径，不编造项目没有的功能、数据、按钮或运行状态。把 HTML 和 `截图方案.json` 放在 `草稿/界面示意/`；方案格式为 `{"screenshots":[{"module":"与 manual_modules.title 完全一致","html":"草稿/界面示意/功能.html","caption":"功能页面","evidence":["相对项目根目录的源码路径"]}]}`。运行：
+选择 `generated-ui` 时，只为第 4 章确实需要图示且无真实截图的功能制作简洁静态 HTML。每张图须列出项目源码或配置的证据路径，不编造项目没有的功能、数据、按钮或运行状态。把 HTML 和 `截图方案.json` 放在 `草稿/界面示意/`；方案格式为 `{"screenshots":[{"module":"与 manual_modules.title 完全一致","html":"草稿/界面示意/功能.html","caption":"功能页面","evidence":["相对项目根目录的源码路径"]}]}`。运行：
 
 ```bash
 python3 ${SKILL_DIR}/scripts/capture_generated_ui.py \
@@ -152,7 +153,7 @@ python3 ${SKILL_DIR}/scripts/capture_generated_ui.py \
 
 ### 7. 用户手册与设计说明书草稿
 
-生成五章用户手册：
+生成八章用户手册：
 
 ```bash
 python3 ${SKILL_DIR}/scripts/generate_user_manual_draft.py \
@@ -171,7 +172,7 @@ python3 ${SKILL_DIR}/scripts/generate_design_spec.py \
   --out-dir 软件著作权申请资料/草稿 --draft-only
 ```
 
-设计说明书正文必须包括背景、系统架构设计（含架构、接口、数据库及项目需要的后续小节）、系统功能概述、系统关键用例描述、典型流程与应用场景。系统功能概述先总览功能域和协作链路，再按 [references/business_understanding_rules.md](references/business_understanding_rules.md) 为每个功能域写通常 4–6 段有证据的正文：定位与入口、输入和约束、核心处理与状态变化、输出与下游衔接、异常和边界。复杂度决定篇幅，不用套话凑字数，也不编造未实现的机制。正式 DOCX 由第 9 步在 Markdown 确认后生成，模板为 `assets/design_spec_template.docx`。
+设计说明书按十章结构生成；原“系统功能概述”扩展为第4章“系统功能与模块详细设计”，通常每模块展开4–6段并按复杂度拆分子节，说明职责、输入约束、核心处理、状态、输出、异常和协作。用户手册第4章取消400字上限，展开操作步骤、字段与示例、结果解读和排错，配必要截图。正式 DOCX 由第9步在 Markdown 确认后生成，模板为 `assets/design_spec_template.docx`。
 
 ### 8. Markdown 草稿确认
 
@@ -193,6 +194,14 @@ python3 ${SKILL_DIR}/scripts/build_docx_from_md.py \
 输出 `正式资料/申请表信息.txt`、`<软件全称>-V1.0.0-源程序鉴别材料.docx`、`<软件全称>_用户手册.docx` 和 `<软件全称>-V1.0.0-软件设计说明书.docx`。用户手册封面、目录与正文由已确认的软件名称和版本号生成；设计说明书首页标题为“<软件全称>软件说明书”（宋体一号），版本号为 Times New Roman 二号。
 用户手册目录在 `soffice` 与 `pypdf` 可用时自动核准页码；设计说明书目录在本机 Word 可用时自动更新。未自动更新时须在 Word 中更新目录并核对页码。正式交付包含一份 TXT 和三份 DOCX，不生成 PDF。
 
+更新目录后重新排版核验两份文档：
+
+```bash
+python3 ${SKILL_DIR}/scripts/measure_document_pages.py --workdir 软件著作权申请资料
+```
+
+结果写入 `草稿/文档页数核验.json`，含文件摘要、排版引擎和实际页数。临时排版PDF仅用于内部核验并自动清理。不足60页时补充薄弱章节的真实细节，超过时压缩重复内容；实质正文修改后重新确认 Markdown，再生成、更新目录并核验，直至两份均为60页。证据不足时说明具体资料缺口。逐页确认正文充实、图表完整、无空白凑页，末页不能截断。
+
 ### 10. 程序化验证与交付
 
 ```bash
@@ -200,4 +209,4 @@ python3 ${SKILL_DIR}/scripts/verify_materials.py --workdir 软件著作权申请
 python3 -m py_compile ${SKILL_DIR}/scripts/*.py
 ```
 
-任何 `[FAIL]` 都必须修复后重跑。另按 [references/verification_checklist.md](references/verification_checklist.md) 对代码真实性、业务真实性、截图匹配度和设计说明书样例残留进行独立核对。全部通过后报告正式资料路径和关键页数，流程结束。
+任何 `[FAIL]` 都必须修复后重跑；两份文档页数未核实或不等于60均不通过。另按 [references/verification_checklist.md](references/verification_checklist.md) 对代码真实性、业务真实性、截图匹配度、逐页内容与设计说明书样例残留进行独立核对。全部通过后报告正式资料路径、两份文档实际页数和排版引擎，流程结束。

@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from common import CODE_LAYOUT, ensure_dir, read_json, safe_filename
+from document_structure import DESIGN_CHAPTERS, MANUAL_CHAPTERS
 
 try:
     from generate_design_spec import generate_design_docx
@@ -107,15 +108,11 @@ def confirmation_issues(workdir: Path) -> list[str]:
     business = read_json_if_exists(draft_dir / "业务理解.json")
     if not business or not business.get("user_confirmed"):
         issues.append("业务理解尚未确认：须确认 草稿/业务理解.md 后记录 `business` 确认点")
-    design_fields = (
-        "design_background",
-        "design_architecture",
-        "design_functions",
-        "design_use_cases",
-        "design_flow_scenarios",
-    )
+    design_fields = tuple(field for field, _title, _pages in DESIGN_CHAPTERS)
     if business and not all(business.get(field) for field in design_fields):
-        issues.append("业务理解缺少软件设计说明书必备章节：须补全 design_background/design_architecture/design_functions/design_use_cases/design_flow_scenarios")
+        issues.append("业务理解缺少十章软件设计说明书字段；须按 business_understanding_rules.md 补全并重新确认")
+    if business and not all(business.get(field) for field, _title, _pages in MANUAL_CHAPTERS):
+        issues.append("业务理解缺少八章用户手册字段；须按 business_understanding_rules.md 补全并重新确认")
 
     selection = read_json_if_exists(draft_dir / "代码文件选择.json")
     if not selection or not selection.get("user_confirmed"):
@@ -408,9 +405,10 @@ def add_manual_cover(document: Any, software_name: str, version: str) -> None:
 
 
 def add_manual_toc(document: Any, chapter_titles: list[str]) -> None:
-    """Make page two a real Word TOC with a readable cached five-entry result."""
-    if len(chapter_titles) != 5:
-        raise RuntimeError(f"用户手册目录须有五个一级章节，实际找到 {len(chapter_titles)} 个")
+    """Make page two a real Word TOC with eight chapter entries."""
+    expected = [f"{index}. {title}" for index, (_field, title, _pages) in enumerate(MANUAL_CHAPTERS, start=1)]
+    if chapter_titles != expected:
+        raise RuntimeError("用户手册须按八章结构生成；请重新生成用户手册 Markdown")
     style = document.styles["TOC 1"] if "TOC 1" in document.styles else document.styles.add_style("TOC 1", WD_STYLE_TYPE.PARAGRAPH)
     style.font.name = "SimSun"
     style.font.size = Pt(12)
@@ -431,7 +429,7 @@ def add_manual_toc(document: Any, chapter_titles: list[str]) -> None:
             begin.set(qn("w:dirty"), "true")
             paragraph.add_run()._r.append(begin)
             instruction = OxmlElement("w:instrText")
-            instruction.text = ' TOC \\o "2-2" \\h \\z \\u '
+            instruction.text = ' TOC \\o "2-2" \\h \\z '
             paragraph.add_run()._r.append(instruction)
             separate = OxmlElement("w:fldChar")
             separate.set(qn("w:fldCharType"), "separate")
@@ -970,9 +968,9 @@ def build_manual_docx_python(md_path: Path, out_path: Path, base_dir: Path, soft
                 caption=image_match.group(1) or None,
             )
             continue
-        heading = re.match(r"^(#{1,4})\s+(.+)$", stripped)
+        heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
         if heading:
-            level = min(len(heading.group(1)), 3)
+            level = len(heading.group(1))
             if level == 1:
                 continue  # 第一页封面已写入用户手册标题。
             p = document.add_heading(heading.group(2), level=level)
@@ -1420,18 +1418,12 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
                 tmp_manual.unlink(missing_ok=True)
         outputs.append(manual_out)
         if not toc_refreshed:
-            warnings.append("用户手册目录页码未自动核准；请在 Word 中更新目录域并核对五章页码")
+            warnings.append("用户手册目录页码未自动核准；请在 Word 中更新目录域并核对八章页码")
     else:
         warnings.append("缺少草稿/用户手册.md")
 
     design_context = read_json_if_exists(draft_dir / "业务理解.json")
-    design_fields = (
-        "design_background",
-        "design_architecture",
-        "design_functions",
-        "design_use_cases",
-        "design_flow_scenarios",
-    )
+    design_fields = tuple(field for field, _title, _pages in DESIGN_CHAPTERS)
     if generate_design_docx is None or not all(design_context.get(field) for field in design_fields):
         raise RuntimeError("软件设计说明书生成前置条件不满足；请检查 python-docx 和业务理解必备字段")
     template = Path(__file__).resolve().parent.parent / "assets" / "design_spec_template.docx"
@@ -1447,6 +1439,7 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
     except Exception as exc:
         raise RuntimeError(f"软件设计说明书生成失败：{exc}") from exc
 
+    warnings.append("用户手册与设计说明书须分别核实排版后恰好 60 页（含封面、目录）；运行 measure_document_pages.py 与 verify_materials.py 后方可交付")
     report = write_report(final_dir, outputs, warnings, [])
     return {"outputs": [str(p) for p in outputs], "warnings": warnings, "report": str(report)}
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draft the five-chapter user manual from confirmed project evidence."""
+"""Draft the eight-chapter user manual from confirmed project evidence."""
 
 from __future__ import annotations
 
@@ -10,20 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from common import ensure_dir, manual_image_caption, read_json
+from document_structure import MANUAL_CHAPTERS, prose, section_markdown
 
 
-TOP_LEVEL_TITLES = [
-    "系统功能概述",
-    "软件安装与配置",
-    "软件使用说明",
-    "典型使用流程总结",
-    "使用注意事项与常见问题",
-]
+TOP_LEVEL_TITLES = [title for _field, title, _pages in MANUAL_CHAPTERS]
 MODULE_PROSE_MIN_CHARS = 120
-MODULE_PROSE_MAX_CHARS = 400
 TEMPLATE_MARKERS = ["进入方式：", "页面内容：", "操作步骤：", "操作规则：", "操作结果与反馈："]
 AI_TONE_MARKERS = ["旨在", "赋能", "一站式", "高效便捷", "显著提升", "强大能力", "丰富功能"]
-SCREENSHOT_PLACEHOLDER_PATTERN = re.compile(r"【图\s*3-\d+\s+截图预留：.*?】")
+SCREENSHOT_PLACEHOLDER_PATTERN = re.compile(r"【图\s*4-\d+\s+截图预留：.*?】")
 
 
 def paragraph_list(raw: Any) -> list[str]:
@@ -108,7 +102,7 @@ def normalize_modules(business: dict[str, Any], workdir: Path) -> list[dict[str,
     if not isinstance(raw, list) or not raw:
         raise SystemExit(
             "STOP_FOR_USER\n"
-            "NEXT_ACTION: 业务理解缺少 `manual_modules`。须依据真实页面、入口、动作和反馈补全第3章内容。"
+            "NEXT_ACTION: 业务理解缺少 `manual_modules`。须依据真实页面、入口、动作和反馈补全第4章内容。"
         )
     modules: list[dict[str, Any]] = []
     for index, item in enumerate(raw, start=1):
@@ -124,6 +118,8 @@ def normalize_modules(business: dict[str, Any], workdir: Path) -> list[dict[str,
             {
                 "title": title,
                 "body": body,
+                "subsections": item.get("subsections") or [],
+                "tables": item.get("tables") or ([item["table"]] if item.get("table") else []),
                 "purpose": required_text(item, "purpose", title),
                 "usage": required_text(item, "usage" if item.get("usage") else "usage_scenario", title),
                 "entry": required_text(item, "entry", title),
@@ -163,50 +159,33 @@ def render_screenshot(lines: list[str], chapter: int, serial: int, item: dict[st
 
 def render_manual(
     software_name: str,
-    overview: list[str],
-    installation: list[str],
-    requirements: tuple[list[str], list[list[str]]] | None,
+    business: dict[str, Any],
     modules: list[dict[str, Any]],
-    flow: list[str],
-    notes: list[str],
     faq: list[dict[str, str]],
 ) -> str:
-    lines = [f"# {software_name}用户手册", "", heading(1, TOP_LEVEL_TITLES[0]), ""]
-    for paragraph in overview:
-        lines.extend([paragraph, ""])
-    lines.extend([heading(2, TOP_LEVEL_TITLES[1]), ""])
-    for paragraph in installation:
-        lines.extend([paragraph, ""])
-    if requirements:
-        headers, rows = requirements
-        lines.extend(["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"])
-        for row in rows:
-            padded = row + [""] * max(0, len(headers) - len(row))
-            lines.append("| " + " | ".join(padded[: len(headers)]) + " |")
-        lines.append("")
-    lines.extend([heading(3, TOP_LEVEL_TITLES[2]), ""])
-    for index, module in enumerate(modules, start=1):
-        lines.extend([f"### 3.{index} {module['title']}", ""])
-        for paragraph in module["body"]:
-            lines.extend([paragraph, ""])
-        for serial, screenshot in enumerate(module["screenshots"], start=1):
-            render_screenshot(lines, 3, serial, screenshot)
-    lines.extend([heading(4, TOP_LEVEL_TITLES[3]), ""])
-    for paragraph in flow:
-        lines.extend([paragraph, ""])
-    lines.extend([heading(5, TOP_LEVEL_TITLES[4]), ""])
-    for paragraph in notes:
-        lines.extend([paragraph, ""])
-    if faq:
-        lines.extend(["### 常见问题", ""])
-        for item in faq:
-            lines.extend([f"**{item['question']}**", item["answer"], ""])
+    lines = [f"# {software_name}用户手册", ""]
+    serial = 0
+    for chapter, (field, title, _pages) in enumerate(MANUAL_CHAPTERS, start=1):
+        lines.extend([heading(chapter, title), ""])
+        if field == "manual_modules":
+            for index, module in enumerate(modules, start=1):
+                lines.extend([f"### 4.{index} {module['title']}", ""])
+                lines.extend(section_markdown(module, f"4.{index}", 3))
+                for screenshot in module["screenshots"]:
+                    serial += 1
+                    render_screenshot(lines, 4, serial, screenshot)
+        elif field == "faq":
+            for index, item in enumerate(faq, start=1):
+                lines.extend([f"### 8.{index} {item['question']}", ""])
+                lines.extend(section_markdown(item["answer"], f"8.{index}", 3))
+        else:
+            lines.extend(section_markdown(business[field], str(chapter)))
     lines.extend(["```text", "STOP_FOR_USER", "NEXT_ACTION: 须确认完整用户手册草稿后运行 confirm_stage.py --stage markdown。", "```", ""])
     return "\n".join(lines)
 
 
 def module_body_text(module: dict[str, Any]) -> str:
-    return "\n".join(module["body"])
+    return "\n".join(section_markdown(module, "4"))
 
 
 def quality_issues(text: str, modules: list[dict[str, Any]]) -> list[str]:
@@ -224,13 +203,11 @@ def quality_issues(text: str, modules: list[dict[str, Any]]) -> list[str]:
         body = module_body_text(module)
         if len(body.replace(" ", "").replace("\n", "")) < MODULE_PROSE_MIN_CHARS:
             issues.append(f"模块正文过短：{module['title']}")
-        if len(body.replace(" ", "").replace("\n", "")) > MODULE_PROSE_MAX_CHARS:
-            issues.append(f"模块正文过长：{module['title']}")
         if module["entry"] and module["entry"] not in body:
             # The model may paraphrase. This is advisory in the generated log, not a hard stop.
             pass
-    if not SCREENSHOT_PLACEHOLDER_PATTERN.search(text) and not re.search(r"!\[图\s*3-\d+", text):
-        issues.append("第3章没有截图或可见截图预留")
+    if not SCREENSHOT_PLACEHOLDER_PATTERN.search(text) and not re.search(r"!\[图\s*4-\d+", text):
+        issues.append("第4章没有截图或可见截图预留")
     return issues
 
 
@@ -262,30 +239,23 @@ def write_review_records(out_dir: Path, records: list[dict[str, Any]], modules: 
 
 
 def build_manual(analysis: dict[str, Any], software_name: str, business: dict[str, Any], workdir: Path) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    overview = required_paragraphs(business, "manual_function_overview", "第1章")
-    installation_raw = business.get("manual_installation_config")
-    if isinstance(installation_raw, dict):
-        installation = paragraph_list(installation_raw.get("paragraphs"))
-        requirements = requirements_table(installation_raw.get("requirements"))
-    else:
-        installation = paragraph_list(installation_raw)
-        requirements = None
-    if not installation:
-        raise SystemExit("STOP_FOR_USER\nNEXT_ACTION: 业务理解缺少 manual_installation_config，无法生成第2章。")
+    for field, title, _pages in MANUAL_CHAPTERS:
+        if field not in {"manual_modules", "faq"}:
+            value = business.get(field)
+            if not prose(value) and not (isinstance(value, dict) and value.get("subsections")):
+                raise SystemExit(f"STOP_FOR_USER\nNEXT_ACTION: 业务理解缺少 {field}，须补写「{title}」。")
     modules = normalize_modules(business, workdir)
-    flow = required_paragraphs(business, "operation_flow", "第4章")
-    notes = required_paragraphs(business, "manual_usage_notes", "第5章")
     faq_raw = business.get("faq")
     faq: list[dict[str, str]] = []
     if isinstance(faq_raw, list):
         for item in faq_raw:
             if isinstance(item, dict) and str(item.get("question") or "").strip() and str(item.get("answer") or "").strip():
-                faq.append({"question": str(item["question"]).strip(), "answer": str(item["answer"]).strip()})
+                faq.append({"question": str(item["question"]).strip(), "answer": item["answer"]})
     if not faq:
-        raise SystemExit("STOP_FOR_USER\nNEXT_ACTION: 业务理解缺少真实 faq，无法生成第5章。")
+        raise SystemExit("STOP_FOR_USER\nNEXT_ACTION: 业务理解缺少真实 faq，无法生成第8章。")
 
     def render() -> str:
-        return render_manual(software_name, overview, installation, requirements, modules, flow, notes, faq)
+        return render_manual(software_name, business, modules, faq)
 
     records: list[dict[str, Any]] = []
     for round_no, action in enumerate(("初稿生成", "结构与章节复核", "截图与用户流程复核", "套话与边界复核"), start=1):

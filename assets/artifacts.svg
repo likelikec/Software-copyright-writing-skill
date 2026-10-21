@@ -56,12 +56,12 @@
 
   <!-- 用户手册 -->
   <text class="title" x="330" y="34">文档鉴别材料（用户手册）</text>
-  <text class="note" x="330" y="52">固定五章，正文依据项目证据撰写</text>
+  <text class="note" x="330" y="52">八章，共60页，正文依据项目证据撰写</text>
   <rect class="card" x="330" y="66" width="250" height="330" rx="4"/>
   <text class="head" x="346" y="88">软件全称 V1.0.0</text>
   <text class="head" x="564" y="88" text-anchor="end">第 6 页</text>
   <line class="rule" x1="346" y1="96" x2="564" y2="96"/>
-  <text class="title" x="346" y="118">三、软件使用说明</text>
+  <text class="title" x="346" y="118">4. 软件功能使用说明</text>
   <line class="line" x1="346" y1="134" x2="562" y2="134"/>
   <line class="line" x1="346" y1="146" x2="558" y2="146"/>
   <line class="line" x1="346" y1="158" x2="540" y2="158"/>
@@ -71,9 +71,9 @@
   <rect class="accent" x="358" y="218" width="194" height="14" rx="2"/>
   <rect class="accent" x="358" y="240" width="120" height="10" rx="2"/>
   <rect class="accent" x="358" y="258" width="160" height="10" rx="2"/>
-  <text class="note" x="346" y="320">图 3-1 看板在无任务时的空状态</text>
+  <text class="note" x="346" y="320">图 4-1 看板在无任务时的空状态</text>
   <line class="rule" x1="346" y1="336" x2="564" y2="336"/>
-  <text class="note" x="346" y="354">正文 120 至 400 字，覆盖入口、动作、</text>
+  <text class="note" x="346" y="354">按功能展开子节，覆盖入口、动作、</text>
   <text class="note" x="346" y="370">规则、反馈与边界情形</text>
   <text class="tag" x="346" y="384">每幅截图独立编号与图注</text>
 
@@ -104,9 +104,9 @@
 
   <!-- 软件设计说明书 -->
   <text class="title" x="40" y="424">软件设计说明书</text>
-  <text class="note" x="40" y="442">模板首页与目录保留，正文按项目证据生成</text>
+  <text class="note" x="40" y="442">十章，共60页，保留模板封面与单页目录</text>
   <rect class="card" x="40" y="452" width="880" height="58" rx="4"/>
-  <text class="body" x="58" y="478">背景　|　系统架构设计（架构、接口、数据库）　|　系统功能概述　|　系统关键用例描述　|　典型流程与应用场景</text>
+  <text class="body" x="58" y="478">背景目标 | 需求 | 架构 | 模块 | 接口 | 数据 | 核心流程 | 安全可靠性 | 部署 | 用例与场景</text>
   <text class="tag" x="58" y="498">完整 DOCX 输出，正文与模板样式分离维护</text>
 
   <text class="note" x="40" y="540">四类材料的软件全称与版本号取自同一处已确认字段；页眉、文件名与申请表「页数」在交付前逐项比对。</text>

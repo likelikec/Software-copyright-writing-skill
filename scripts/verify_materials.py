@@ -35,6 +35,8 @@ from pathlib import Path
 from typing import Any
 
 from common import manual_image_caption, read_json, safe_filename
+from document_structure import DESIGN_CHAPTERS, MANUAL_CHAPTERS
+from measure_document_pages import measure_documents
 
 try:
     # Reuse the exact 有效字符数 (whitespace/newline-stripped length) algorithm
@@ -109,7 +111,7 @@ APPLICATION_BOILERPLATE_PHRASES = [
 ALL_UNCONDITIONAL_PHRASES = UNCONDITIONAL_BLACKLIST_PHRASES + APPLICATION_BOILERPLATE_PHRASES
 
 # 条件黑名单：这几个词本身是常见的软件工程文档术语（总体设计说明书、详细设计
-# 说明书、测试案例……），但不属于固定五章用户手册；出现在手册正文时记录为待修正项。
+# 说明书、测试案例……），出现在用户手册正文时须结合项目证据核对。
 CONDITIONAL_BLACKLIST_PHRASES = [
     "总体设计",
     "详细设计",
@@ -710,7 +712,7 @@ def check_fabricated_phrases(workdir: Path, manual_docx: Path | None, app_txt: P
         record(
             cond_check,
             "FAIL",
-            f"固定五章用户手册正文含有疑似套话：{undeclared}",
+            f"用户手册正文含有须核对的术语：{undeclared}",
         )
     else:
         record(cond_check, "PASS", "用户手册正文未发现总体设计/详细设计/测试案例字样")
@@ -800,7 +802,7 @@ def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> N
     software_name = app_fields.get("软件全称", "").strip()
     version = app_fields.get("版本号", "").strip()
     expected_cover_title = f"{software_name}软件说明书"
-    required = ["背景", "系统架构设计", "系统功能概述", "系统关键用例描述", "典型流程与应用场景"]
+    required = [title for _field, title, _pages in DESIGN_CHAPTERS]
     missing = [title for title in required if title not in text]
     try:
         with zipfile.ZipFile(design_docx) as zf:
@@ -825,7 +827,7 @@ def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> N
     elif "{{SOFTWARE_NAME}}" in word_xml:
         record(check_name, "FAIL", "设计说明书封面、目录或正文仍残留模板样例软件名称")
     else:
-        record(check_name, "PASS", f"{design_docx.name} 已包含确认名称、版本、模板目录域和五类必备章节")
+        record(check_name, "PASS", f"{design_docx.name} 已包含确认名称、版本、模板目录域和十章必备内容")
     if DOCX_AVAILABLE and software_name and version:
         try:
             document = Document(str(design_docx))
@@ -841,6 +843,34 @@ def check_design_spec(design_docx: Path | None, app_fields: dict[str, str]) -> N
                 record(f"{check_name} / 首页字体", "FAIL", "标题或版本号字体、字号与规定不符")
         except (OSError, StopIteration, ValueError) as exc:
             record(f"{check_name} / 首页字体", "FAIL", f"无法核对封面字体：{exc}")
+
+
+def check_document_structure_and_pages(workdir: Path, manual_docx: Path | None, design_docx: Path | None) -> None:
+    specs = [(manual_docx, MANUAL_CHAPTERS, "Heading 2", "用户手册"), (design_docx, DESIGN_CHAPTERS, "Heading 1", "软件设计说明书")]
+    for path, chapters, style, label in specs:
+        if path is None:
+            record(f"10. 文档结构 / {label}", "FAIL", "文件缺失，无法核对章节与60页要求")
+            continue
+        if DOCX_AVAILABLE:
+            try:
+                headings = [p.text.strip() for p in Document(str(path)).paragraphs if p.style.name == style]
+                actual = [re.sub(r"^\d+[.、]?\s*", "", text) for text in headings]
+                expected = [title for _field, title, _pages in chapters]
+                record(f"10. 文档结构 / {label}", "PASS" if actual == expected else "FAIL", "正文章节与顺序正确" if actual == expected else f"章节或顺序不符，实际为 {actual}")
+            except Exception as exc:
+                record(f"10. 文档结构 / {label}", "FAIL", f"无法读取章节：{exc}")
+        else:
+            record(f"10. 文档结构 / {label}", "FAIL", "需要 python-docx 核对正文标题；目录文字不能代替正文章节")
+    paths = [path for path, _chapters, _style, _label in specs if path is not None]
+    for result in measure_documents(workdir, paths):
+        pages = result.get("pages")
+        if pages is None:
+            record(f"11. 实际排版页数 / {result['file']}", "FAIL", f"页数未核实：{result.get('error')}；须配置排版引擎后重跑")
+        elif result["status"] == "pass":
+            record(f"11. 实际排版页数 / {result['file']}", "PASS", f"{result['engine']} 重新排版为60页，含封面与目录；仍须逐页检查内容充实及版式")
+        else:
+            action = "补充薄弱章节的真实操作、字段、案例或实现细节" if pages < 60 else "压缩重复内容并合并冗余图表，保留完整功能与末章"
+            record(f"11. 实际排版页数 / {result['file']}", "FAIL", f"{result['engine']} 实际为{pages}页，要求60页；须{action}，更新目录后重新排版")
 
 
 def check_gates(workdir: Path) -> None:
@@ -946,6 +976,7 @@ def main() -> int:
     check_screenshot_dimensions(manual_docx)
     check_field_lengths(app_fields)
     check_design_spec(design_docx, app_fields)
+    check_document_structure_and_pages(workdir, manual_docx, design_docx)
     check_gates(workdir)
 
     report_text, counts = render_report()

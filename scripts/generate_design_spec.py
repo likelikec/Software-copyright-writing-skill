@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from common import ensure_dir, read_json, safe_filename
+from document_structure import DESIGN_CHAPTERS, section_markdown
 
 try:
     from docx import Document
@@ -28,13 +29,7 @@ else:
     DOCX_IMPORT_ERROR = None
 
 
-REQUIRED_FIELDS = (
-    ("design_background", "背景"),
-    ("design_architecture", "系统架构设计"),
-    ("design_functions", "系统功能概述"),
-    ("design_use_cases", "系统关键用例描述"),
-    ("design_flow_scenarios", "典型流程与应用场景"),
-)
+REQUIRED_FIELDS = tuple((field, title) for field, title, _pages in DESIGN_CHAPTERS)
 
 
 def paragraphs(value: Any) -> list[str]:
@@ -68,18 +63,16 @@ def validate_design_structure(business: dict[str, Any]) -> None:
     for field, _title in REQUIRED_FIELDS:
         section_payload(business.get(field), field)
     _body, architecture = section_payload(business.get("design_architecture"), "design_architecture")
-    architecture_titles = [str(item.get("title") or "").strip() for item in architecture]
-    if architecture_titles[:3] != ["架构设计", "接口设计", "数据库设计"]:
+    if not architecture:
         raise SystemExit(
             "STOP_FOR_USER\n"
-            "NEXT_ACTION: 系统架构设计须依次包含架构设计、接口设计、数据库设计三个小节；"
-            "后续小节可依据真实项目增加。"
+            "NEXT_ACTION: 系统总体架构设计须包含真实分层、组件协作或部署关系小节；接口与数据设计独立成章。"
         )
     function_overview, functions = section_payload(business.get("design_functions"), "design_functions")
     if not function_overview or not functions:
         raise SystemExit(
             "STOP_FOR_USER\n"
-            "NEXT_ACTION: 系统功能概述须先有总览段落，再用 subsections 分项介绍真实功能。"
+            "NEXT_ACTION: 系统功能与模块详细设计须先有总览，再用 subsections 分项说明真实模块。"
         )
     _use_case_overview, use_cases = section_payload(business.get("design_use_cases"), "design_use_cases")
     if not use_cases:
@@ -87,6 +80,8 @@ def validate_design_structure(business: dict[str, Any]) -> None:
             "STOP_FOR_USER\n"
             "NEXT_ACTION: 系统关键用例描述须至少包含一个典型功能用例小节。"
         )
+    if len(use_cases) < 2 or "典型流程与应用场景" not in str(use_cases[-1].get("title") or ""):
+        raise SystemExit("STOP_FOR_USER\nNEXT_ACTION: 第10章须包含关键用例，并以典型流程与应用场景小节结束。")
 
 
 def table_payload(raw: Any) -> tuple[list[str], list[list[str]]] | None:
@@ -124,20 +119,16 @@ def add_section(document: Any, heading: str, value: Any, field: str, level: int 
     for paragraph in body:
         add_body_paragraph(document, paragraph)
     if isinstance(value, dict):
-        payload = table_payload(value.get("table"))
-        if payload:
-            add_table(document, payload)
+        for raw in value.get("tables") or ([value["table"]] if value.get("table") else []):
+            payload = table_payload(raw)
+            if payload:
+                add_table(document, payload)
     for index, subsection in enumerate(subsections, start=1):
         title = str(subsection.get("title") or "").strip()
-        match = re.match(r"(\d+)", heading)
+        match = re.match(r"(\d+(?:\.\d+)*)", heading)
         prefix = f"{match.group(1)}.{index}" if match else ""
         numbered = f"{prefix} {title}" if prefix else title
-        document.add_heading(numbered, level=min(level + 1, 3))
-        for paragraph in paragraphs(subsection.get("paragraphs") or subsection.get("body")):
-            add_body_paragraph(document, paragraph)
-        payload = table_payload(subsection.get("table"))
-        if payload:
-            add_table(document, payload)
+        add_section(document, numbered, subsection, f"{field}.{index}", min(level + 1, 6))
 
 
 def replace_text_in_runs(paragraph: Any, replacements: dict[str, str]) -> None:
@@ -310,7 +301,7 @@ def rebuild_toc_cache(document: Any) -> None:
     headings = [
         (paragraph, paragraph.style.name == "Heading 2")
         for paragraph in document.paragraphs
-        if paragraph.style.name in {"Heading 1", "Heading 2"}
+        if paragraph.style.name == "Heading 1"
     ]
     if not headings:
         raise RuntimeError("设计说明书正文没有可用于目录的标题")
@@ -349,7 +340,7 @@ def rebuild_toc_cache(document: Any) -> None:
             add_field(paragraph, "begin")
             instruction_run = OxmlElement("w:r")
             instruction = OxmlElement("w:instrText")
-            instruction.text = 'TOC \\o "1-2" \\h \\u'
+            instruction.text = 'TOC \\o "1-1" \\h'
             instruction_run.append(instruction)
             paragraph.append(instruction_run)
             add_field(paragraph, "separate")
@@ -380,29 +371,16 @@ def rebuild_toc_cache(document: Any) -> None:
 
 
 def add_design_content(document: Any, business: dict[str, Any]) -> None:
-    background = business["design_background"]
-    architecture = business["design_architecture"]
-    functions = business["design_functions"]
-    use_cases = business["design_use_cases"]
-    flow = business["design_flow_scenarios"]
-
-    add_section(document, "1 背景", background, "design_background")
-    add_section(document, "2 系统架构设计", architecture, "design_architecture")
-    add_section(document, "3 系统功能概述", functions, "design_functions")
-    add_section(document, "4 系统关键用例描述", use_cases, "design_use_cases")
-    add_section(document, "5 典型流程与应用场景", flow, "design_flow_scenarios")
+    for chapter, (field, title) in enumerate(REQUIRED_FIELDS, start=1):
+        add_section(document, f"{chapter} {title}", business[field], field)
 
 
 def markdown_design(software_name: str, version: str, business: dict[str, Any]) -> str:
     lines = [f"# {software_name} V{version.lstrip('Vv')} 软件设计说明书", ""]
     for chapter, (field, title) in enumerate(REQUIRED_FIELDS, start=1):
         value = business.get(field)
-        body, subsections = section_payload(value, field)
         lines.extend([f"## {chapter} {title}", ""])
-        lines.extend(sum(([paragraph, ""] for paragraph in body), []))
-        for index, item in enumerate(subsections, start=1):
-            lines.extend([f"### {chapter}.{index} {item['title']}", ""])
-            lines.extend(sum(([paragraph, ""] for paragraph in paragraphs(item.get("paragraphs") or item.get("body"))), []))
+        lines.extend(section_markdown(value, str(chapter)))
     return "\n".join(lines) + "\n"
 
 

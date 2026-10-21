@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from common import ensure_dir, iter_project_files, read_json, read_text, rel, write_json
+from document_structure import DESIGN_CHAPTERS, MANUAL_CHAPTERS, prose, section_markdown
 
 
 DOC_EXTS = {".md", ".txt", ".rst", ".adoc"}
@@ -155,6 +156,13 @@ def write_evidence_md(path: Path, evidence: dict[str, Any]) -> None:
 def write_model_template(path: Path, evidence: dict[str, Any]) -> None:
     template = {
         "software_name": evidence["software_name"],
+        "document_page_plan": {
+            "target_pages_each": 60,
+            "front_matter_pages_each": 2,
+            "manual": [{"field": field, "title": title, "planned_pages": pages} for field, title, pages in MANUAL_CHAPTERS],
+            "design": [{"field": field, "title": title, "planned_pages": pages} for field, title, pages in DESIGN_CHAPTERS],
+            "note": "分章预算可按证据调整，正文合计各58页；最终页数必须重新排版核验。",
+        },
         "product_positioning": "",
         "industry": "",
         "target_users": [],
@@ -179,12 +187,19 @@ def write_model_template(path: Path, evidence: dict[str, Any]) -> None:
                 "rows": [["运行环境", "按项目实际证据填写"]],
             },
         },
+        "manual_basics": {"paragraphs": ["第3章：说明界面布局、导航、术语、数据准备、通用操作和使用前检查。"], "subsections": []},
+        "manual_data_management": {"paragraphs": ["第5章：依据实际能力说明数据导入、查看、筛选、编辑、导出、保存和历史记录；无某项能力时说明真实数据处理边界。"], "subsections": []},
         "manual_modules": [
             {
                 "title": "真实页面或核心流程名称",
                 "body": [
                     "该模块正文第一段，由模型依据真实项目证据撰写，说明功能用途、入口和用户可见内容。",
-                    "该模块正文第二段，说明用户动作、规则、反馈和边界，去除空白后通常为 120 至 220 字，复杂模块不超过 400 字。",
+                    "该模块正文说明使用场景、前置条件、输入示例、操作步骤、结果解读、异常与限制；依据功能复杂度设置以下子节，无400字上限。",
+                ],
+                "subsections": [
+                    {"title": "使用准备与输入要求", "paragraphs": ["说明有证据的前置条件、关键字段、必填项、格式约束及具体输入示例。"]},
+                    {"title": "操作过程与结果", "paragraphs": ["按真实界面解释每步操作、状态变化、成功判据和结果解读，避免重复模块总览。"]},
+                    {"title": "异常处理与功能衔接", "paragraphs": ["说明真实错误提示、排查方法、恢复操作、边界，以及后续功能入口。"]},
                 ],
                 "evidence": ["页面、路由、组件、README 或需求文档路径"],
                 "purpose": "该页面或流程在当前软件中的用途。",
@@ -198,24 +213,24 @@ def write_model_template(path: Path, evidence: dict[str, Any]) -> None:
                 "boundary": ["可预见的边界情形及软件的实际表现，例如依赖数据缺失时界面的显示内容、前置条件未满足时仍可使用的功能、超出额度时的处置方式。无相应内容时留空数组。"],
             }
         ],
-        "operation_flow": ["第4章正文：以一个或多个真实业务流程串起入口、关键操作、结果和产物。"],
-        "manual_usage_notes": ["第5章正文：记录真实运行限制、数据边界、依赖问题和可执行的排查步骤。"],
+        "operation_flow": {"paragraphs": ["第6章：按真实任务组织多个完整案例，串联准备材料、入口、操作、阶段结果和最终产物。"], "subsections": []},
+        "manual_usage_notes": {"paragraphs": ["第7章：说明真实限制、依赖条件、数据要求、操作风险与恢复方法。"], "subsections": []},
         "faq": [
             {"question": "按当前软件真实使用场景填写常见问题", "answer": "给出面向普通用户的处理方法。"}
         ],
         "design_background": {
-            "paragraphs": ["设计说明书第1章正文：说明项目背景、业务痛点、建设目标和适用边界。"]
+            "paragraphs": ["第1章项目背景与设计目标：说明应用背景、实际问题、建设目标、范围和约束。"]
         },
+        "design_requirements": {"paragraphs": ["第2章：根据源码和需求证据说明参与者、业务需求、功能需求、输入输出要求和运行条件。"], "subsections": []},
         "design_architecture": {
-            "paragraphs": ["设计说明书第2章总述：说明系统总体架构、组件关系和数据流向。"],
+            "paragraphs": ["第3章总述：说明系统分层、组件协作、部署关系和整体数据流。"],
             "subsections": [
                 {"title": "架构设计", "paragraphs": ["说明真实模块、部署形态和关键技术边界。"]},
-                {"title": "接口设计", "paragraphs": ["说明真实接口、调用方、输入输出和错误处理。"]},
-                {"title": "数据库设计", "paragraphs": ["说明真实数据存储、主要实体、字段关系和一致性策略。"]},
+                {"title": "组件协作与数据流", "paragraphs": ["说明任务经过各组件的路径、依赖关系和数据去向；详细接口和存储分别写入第5、6章。"]},
             ],
         },
         "design_functions": {
-            "paragraphs": ["设计说明书第3章总述：说明系统整体功能链路、主要功能域之间的关系，以及输入如何逐步形成结果。"],
+            "paragraphs": ["第4章总述：说明系统整体功能链路、功能域关系及输入如何逐步形成结果，再逐模块写详细设计。"],
             "subsections": [
                 {"title": "真实功能域名称", "paragraphs": [
                     "第1段：依据项目证据说明功能职责、使用者或调用方、入口、前置条件，以及与上游功能的关系。",
@@ -223,24 +238,28 @@ def write_model_template(path: Path, evidence: dict[str, Any]) -> None:
                     "第3段：按实际执行顺序解释核心处理、条件分支、调用的组件或接口、数据转换与状态变化。",
                     "第4段：说明输出结果、界面反馈、持久化或导出产物、数据去向，以及下游功能如何使用它们。",
                     "第5段：说明源码中可核实的异常、空数据、重复操作、失败恢复和适用边界；不存在的机制不补写。",
-                    "第6段（按需）：用项目中的一个具体场景说明上述机制如何协同，不重复第4章的逐步用例。",
+                    "第6段（按需）：用项目具体场景解释机制协同，复杂模块继续拆分子节；用例步骤放第10章。",
                 ]}
             ],
         },
+        "design_interfaces": {"paragraphs": ["第5章：列出真实外部接口、模块调用、调用方、参数、返回值、错误处理和交互时序；没有网络API时说明内部函数或命令行接口。"], "subsections": []},
+        "design_data": {"paragraphs": ["第6章：说明真实数据对象、实体关系、字段、约束、文件组织、读写路径和生命周期；没有数据库时写实际文件或内存存储。"], "subsections": []},
+        "design_processing": {"paragraphs": ["第7章：解释源码中的核心算法、处理步骤、条件分支、状态转换及任务调度；没有自定义算法时写真实处理流程。"], "subsections": []},
+        "design_reliability": {"paragraphs": ["第8章：说明有实现证据的输入校验、权限、异常、日志、重试与恢复；明确未实现部分的边界。"], "subsections": []},
+        "design_deployment": {"paragraphs": ["第9章：说明运行组件、环境配置、启动顺序、资源依赖及维护机制。"], "subsections": []},
         "design_use_cases": {
-            "paragraphs": ["设计说明书第4章总述：选择典型功能说明参与者、前置条件、操作步骤、结果和异常分支。"],
+            "paragraphs": ["第10章：选择真实关键功能用例，最后用跨模块典型流程与应用场景串联系统协作。"],
             "subsections": [
-                {"title": "典型功能用例名称", "paragraphs": ["说明参与者、前置条件、操作步骤、正常结果和异常分支。"]}
+                {"title": "典型功能用例名称", "paragraphs": ["说明参与者、触发条件、前置条件、正常流程、备选与异常分支、后置条件及数据对象。"]},
+                {"title": "典型流程与应用场景", "paragraphs": ["串联多个模块的入口、输入、处理、阶段产物和最终结果，解释协作关系。"]},
             ],
         },
-        "design_flow_scenarios": {
-            "paragraphs": ["设计说明书第5章正文：描述一个典型流程及其应用场景，串联入口、处理和结果。"]
-        },
         "model_review_notes": [
-            "用户手册固定五章，顺序为系统功能概述、软件安装与配置、软件使用说明、典型使用流程总结、使用注意事项与常见问题。",
-            "manual_modules 只用于第3章；模块正文依据真实入口、动作、规则、反馈和边界撰写。优先使用真实截图；缺图时须先询问用户是否生成有证据的简洁界面示意图。",
-            "设计说明书固定包含背景、系统架构设计、系统功能概述、系统关键用例描述、典型流程与应用场景；系统架构设计至少说明架构、接口和数据库。",
-            "设计说明书第3章每个功能小节通常写4–6段：职责和入口、输入和约束、顺序处理和状态、输出与数据去向、异常和边界，必要时补一个项目场景；按复杂度调整，不编造不存在的机制或用套话凑篇幅。",
+            "用户手册固定八章，manual_modules用于第4章，图号为图4-x；按使用者完成任务的路径展开子节、字段表、步骤、截图及结果解读。",
+            "优先使用真实截图，缺图时询问用户是否生成有证据的简洁界面；图注只写功能或页面名称，生成方式保留在截图清单。",
+            "设计说明书固定十章；接口、数据与存储、核心处理、安全可靠性、部署运行独立成章，关键用例与典型场景放最后。",
+            "第4章各模块通常至少展开4–6段，复杂模块设子节，说明职责、输入约束、顺序处理、状态、输出与数据去向、异常边界和协作关系，逐项对照真实实现。",
+            "两份文档各60页，含封面与单页目录；章节预算见document_structure.py和撰写规则。先按证据规划58页正文，再按排版结果补写或压缩。禁止空白页、重复段落、放大字号行距或拉伸图片凑页。",
             "缺少真实证据时保留待补信息并停止，不得用模板事实替代项目事实。",
         ],
     }
@@ -279,7 +298,7 @@ def normalize_model_context(model: dict[str, Any], evidence: dict[str, Any], web
     if missing:
         raise SystemExit("Model context missing feature details: " + "、".join(missing[:12]))
     function_overview = model.get("manual_function_overview") or []
-    if not isinstance(function_overview, list) or not any(str(item).strip() for item in function_overview):
+    if not prose(function_overview) and not (isinstance(function_overview, dict) and function_overview.get("subsections")):
         raise SystemExit("Model context field cannot be empty: manual_function_overview")
     installation = model.get("manual_installation_config")
     if isinstance(installation, dict):
@@ -310,20 +329,18 @@ def normalize_model_context(model: dict[str, Any], evidence: dict[str, Any], web
                 missing_value = not str(value or "").strip()
             if missing_value:
                 raise SystemExit(f"manual_modules item {index} ({title or 'untitled'}) missing field: {field}")
-    operation_flow = required_list(model.get("operation_flow"), "operation_flow")
-    usage_notes = required_list(model.get("manual_usage_notes"), "manual_usage_notes")
+    for field in ("manual_basics", "manual_data_management", "operation_flow", "manual_usage_notes"):
+        value = model.get(field)
+        if not prose(value) and not (isinstance(value, dict) and value.get("subsections")):
+            raise SystemExit(f"Model context field cannot be empty: {field}; 请按八章用户手册补全")
+    operation_flow = model["operation_flow"]
+    usage_notes = model["manual_usage_notes"]
     faq = model.get("faq") or []
     if faq and not isinstance(faq, list):
         raise SystemExit("Model context field must be a list: faq")
     if not faq:
         raise SystemExit("Model context field cannot be empty: faq")
-    design_fields = (
-        "design_background",
-        "design_architecture",
-        "design_functions",
-        "design_use_cases",
-        "design_flow_scenarios",
-    )
+    design_fields = tuple(field for field, _title, _pages in DESIGN_CHAPTERS)
     for field in design_fields:
         value = model.get(field)
         if not isinstance(value, (dict, list, str)):
@@ -354,17 +371,17 @@ def normalize_model_context(model: dict[str, Any], evidence: dict[str, Any], web
         "technical_characteristics": required_text(model, "technical_characteristics"),
         "software_technical_option": str(model.get("software_technical_option") or "应用软件"),
         "software_category": str(model.get("software_category") or "应用软件"),
-        "manual_function_overview": [str(paragraph).strip() for paragraph in function_overview if str(paragraph).strip()],
+        "manual_function_overview": function_overview,
         "manual_installation_config": installation,
         "manual_modules": manual_modules,
+        "manual_basics": model["manual_basics"],
+        "manual_data_management": model["manual_data_management"],
         "operation_flow": operation_flow,
         "manual_usage_notes": usage_notes,
         "faq": faq,
-        "design_background": model.get("design_background"),
-        "design_architecture": model.get("design_architecture"),
-        "design_functions": model.get("design_functions"),
-        "design_use_cases": model.get("design_use_cases"),
-        "design_flow_scenarios": model.get("design_flow_scenarios"),
+        **{field: model[field] for field in design_fields},
+        "document_schema_version": 6,
+        "document_page_plan": model.get("document_page_plan") or {},
         "model_authored": True,
         "external_research_notes": web_notes,
         "confirmation_required": True,
@@ -399,20 +416,20 @@ def write_context_md(path: Path, context: dict[str, Any]) -> None:
     for item in context["business_features"]:
         lines.append(f"- {item}：{context['business_feature_details'].get(item, '')}")
     lines.extend(["", "## 典型操作流程", ""])
-    lines.extend(f"{i}. {item}" for i, item in enumerate(context["operation_flow"], start=1))
+    lines.extend(section_markdown(context["operation_flow"], "6"))
     lines.extend(
         [
             "",
             "## 用户手册章节构成",
             "",
-            "用户手册固定为五章，顺序为：系统功能概述、软件安装与配置、软件使用说明、典型使用流程总结、使用注意事项与常见问题。",
+            "用户手册固定八章，按用户操作组织内容；与设计说明书各须排版为60页（含封面与目录）。",
             "",
         ]
     )
     lines.extend(
         f"{index}. {title}"
         for index, title in enumerate(
-            ("系统功能概述", "软件安装与配置", "软件使用说明", "典型使用流程总结", "使用注意事项与常见问题"),
+            tuple(title for _field, title, _pages in MANUAL_CHAPTERS),
             start=1,
         )
     )
@@ -436,8 +453,8 @@ def write_context_md(path: Path, context: dict[str, Any]) -> None:
             "",
             "## 软件设计说明书结构",
             "",
-            "设计说明书固定包含背景、系统架构设计、系统功能概述、系统关键用例描述、典型流程与应用场景。",
-            "系统架构设计至少包含架构设计、接口设计和数据库设计，其他小节按项目真实需要补充。",
+            "设计说明书固定十章：" + "、".join(title for _field, title, _pages in DESIGN_CHAPTERS) + "。",
+            "正文规划58页；实际页数须通过Word或LibreOffice重新排版核验。",
             "",
             "",
             "## 申请表建议口径",
