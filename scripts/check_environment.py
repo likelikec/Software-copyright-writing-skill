@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -33,8 +32,7 @@ def check_environment(skill_dir: Path) -> dict[str, Any]:
     python_docx = module_available("docx")
     pypdf_available = module_available("pypdf")
     soffice_available = shutil.which("soffice") is not None
-    word_available = platform.system() == "Darwin" and Path("/Applications/Microsoft Word.app").is_dir() and shutil.which("osascript") is not None
-    pagination_available = word_available or (pypdf_available and soffice_available)
+    pagination_available = pypdf_available and soffice_available
     ffmpeg_ok, ffmpeg_version = command_version(["ffmpeg", "-version"])
     ffprobe_ok, ffprobe_version = command_version(["ffprobe", "-version"])
 
@@ -63,7 +61,7 @@ def check_environment(skill_dir: Path) -> dict[str, Any]:
             "ffprobe": ffprobe_version,
         },
         "final_docx_mode": final_docx_mode,
-        "pagination_note": "页数核验能力可用；仍须实际执行核验" if pagination_available else "缺少实际排版能力，须配置 Microsoft Word 或 soffice + pypdf 才能通过两份文档60页验收",
+        "pagination_note": "页数核验能力可用；仍须实际执行核验" if pagination_available else "缺少静默排版能力，须配置 soffice + pypdf 才能通过两份文档60页验收",
         "recommendation": (
             "python-docx 可用，可生成三类 Word 文档和申请表 TXT。"
             if python_docx
@@ -94,11 +92,11 @@ def write_markdown(path: Path, data: dict[str, Any]) -> None:
         f"- 申请表 TXT：可用",
         f"- 三类 Word 文档：{'可用' if caps['python_docx'] else '不可用'}",
         f"- python-docx：{'可用' if caps['python_docx'] else '不可用'}",
-        f"- 用户手册目录自动核页（soffice + pypdf）：{'可用' if caps['manual_toc_auto'] else '不可用，需在 Word 中更新目录'}",
+        f"- 用户手册目录自动核页（soffice + pypdf）：{'可用' if caps['manual_toc_auto'] else '不可用，须先配置 soffice + pypdf'}",
         f"- 两份文档60页核验：{data['pagination_note']}",
         f"- 操作视频抽帧（ffmpeg + ffprobe）：{'可用' if caps['operation_video_frames'] else '不可用'}（ffmpeg: {data['versions']['ffmpeg']}；ffprobe: {data['versions']['ffprobe']}）",
         "",
-        "代码鉴别材料使用 Courier New 六号字；用户手册目录可借助 soffice 与 pypdf 自动核页，设计说明书目录在 Word 可用时更新。正式资料包含申请表 TXT 和三类 DOCX。",
+        "代码鉴别材料使用 Courier New 六号字；两份文档的目录用 soffice 与 pypdf 静默核页，不自动打开桌面版 Word。正式资料包含申请表 TXT 和三类 DOCX。",
         "",
         "操作视频抽帧能力仅在用户选择提供操作视频时需要。不提供视频不影响后续流程；用户手册优先使用已有真实截图，生成界面示意图时还需 Chrome/Chromium/Edge。",
         "",

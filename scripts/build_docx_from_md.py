@@ -426,7 +426,7 @@ def add_manual_toc(document: Any, chapter_titles: list[str]) -> None:
         if index == 1:
             begin = OxmlElement("w:fldChar")
             begin.set(qn("w:fldCharType"), "begin")
-            begin.set(qn("w:dirty"), "true")
+            begin.set(qn("w:dirty"), "false")
             paragraph.add_run()._r.append(begin)
             instruction = OxmlElement("w:instrText")
             instruction.text = ' TOC \\o "2-2" \\h \\z '
@@ -491,7 +491,7 @@ def add_toc_field(document: Any) -> None:
     toc_paragraph = document.add_paragraph()
     begin = OxmlElement("w:fldChar")
     begin.set(qn("w:fldCharType"), "begin")
-    begin.set(qn("w:dirty"), "true")
+    begin.set(qn("w:dirty"), "false")
     instr = OxmlElement("w:instrText")
     instr.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
     instr.text = ' TOC \\o "2-2" \\h \\z \\u '
@@ -516,27 +516,18 @@ def add_toc_field(document: Any) -> None:
     break_run._r.append(page_break)
 
 
-def enable_auto_update_fields(document: Any) -> None:
-    """Set the document to refresh all fields (TOC/PAGE/NUMPAGES) when
-    opened in Word, so the reader never has to press F9 or right-click
-    "update field" by hand.
-
-    python-docx has no dedicated API for this, so the setting is written
-    directly as ``<w:updateFields w:val="true"/>`` into word/settings.xml.
-    Per the CT_Settings sequence in ECMA-376, updateFields is ordered
-    after the savePreviewPicture/schema-validation flag group and before
-    the compat block; python-docx's default template does not emit the
-    elements in between, so inserting immediately before the existing
-    w:compat element keeps the document's element order valid.
-    """
+def disable_auto_update_fields(document: Any) -> None:
+    """Keep Word from prompting to refresh fields when a generated DOCX opens."""
     settings_root = document.settings.element
-    update_fields = OxmlElement("w:updateFields")
-    update_fields.set(qn("w:val"), "true")
-    compat = settings_root.find(qn("w:compat"))
-    if compat is not None:
-        compat.addprevious(update_fields)
-    else:
-        settings_root.append(update_fields)
+    update_fields = settings_root.find(qn("w:updateFields"))
+    if update_fields is None:
+        update_fields = OxmlElement("w:updateFields")
+        compat = settings_root.find(qn("w:compat"))
+        if compat is not None:
+            compat.addprevious(update_fields)
+        else:
+            settings_root.append(update_fields)
+    update_fields.set(qn("w:val"), "false")
 
 
 def build_code_docx_python(md_path: Path, out_path: Path, software_name: str, version: str) -> None:
@@ -1008,7 +999,7 @@ def build_manual_docx_python(md_path: Path, out_path: Path, base_dir: Path, soft
     flush_table()
     force_black_document(document)
     set_manual_header(document, software_name, version)
-    enable_auto_update_fields(document)
+    disable_auto_update_fields(document)
     document.save(out_path)
 
 
@@ -1418,7 +1409,7 @@ def build_all(workdir: Path, software_name: str, version: str) -> dict[str, Any]
                 tmp_manual.unlink(missing_ok=True)
         outputs.append(manual_out)
         if not toc_refreshed:
-            warnings.append("用户手册目录页码未自动核准；请在 Word 中更新目录域并核对八章页码")
+            warnings.append("用户手册目录页码未自动核准；请配置 soffice 与 pypdf 后重新生成")
     else:
         warnings.append("缺少草稿/用户手册.md")
 

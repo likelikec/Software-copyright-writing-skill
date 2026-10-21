@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import argparse
-import platform
 import re
 import shutil
 import subprocess
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -206,80 +206,60 @@ def clear_template_content_after_toc(document: Any) -> None:
             body.remove(child)
 
 
-def request_toc_refresh(document: Any) -> None:
+def disable_toc_refresh_on_open(document: Any) -> None:
     settings = document.settings._element
     update_fields = settings.find(qn("w:updateFields"))
     if update_fields is None:
         update_fields = OxmlElement("w:updateFields")
         settings.append(update_fields)
-    update_fields.set(qn("w:val"), "true")
+    update_fields.set(qn("w:val"), "false")
 
 
-def refresh_toc_in_word(path: Path) -> None:
-    """Save real TOC page numbers when Word is available on macOS.
-
-    Other systems retain the updateFields flag so Word can refresh the directory
-    when the recipient opens the DOCX.
-    """
-    if platform.system() != "Darwin" or not shutil.which("osascript"):
-        return
-    probe = subprocess.run(
-        ["osascript", "-e", 'POSIX path of (path to application id "com.microsoft.Word")'],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    if probe.returncode != 0:
-        return
-    posix_path = str(path.resolve()).replace("\\", "\\\\").replace('"', '\\"')
-    doc_name = path.name.replace("\\", "\\\\").replace('"', '\\"')
-    script = f'''
-set docPosix to "{posix_path}"
-set docName to "{doc_name}"
-with timeout of 600 seconds
-  tell application "Microsoft Word"
-    set savedAlerts to display alerts
-    set display alerts to alerts none
-    set theDoc to missing value
-    try
-      try
-        if (exists document docName) then close document docName saving no
-      end try
-      open (POSIX file docPosix)
-      repeat 80 times
-        if (exists document docName) then
-          set theDoc to document docName
-          exit repeat
-        end if
-        delay 0.5
-      end repeat
-      if theDoc is missing value then error "Word did not open design specification"
-      repaginate theDoc
-      update field (every field of text object of theDoc)
-      repaginate theDoc
-      save theDoc
-      close theDoc saving no
-      set theDoc to missing value
-    on error errMsg number errNum
-      try
-        if theDoc is not missing value then close theDoc saving no
-      end try
-      set display alerts to savedAlerts
-      error errMsg number errNum
-    end try
-    set display alerts to savedAlerts
-  end tell
-end timeout
-'''
-    result = subprocess.run(
-        ["osascript", "-"],
-        input=script,
-        capture_output=True,
-        text=True,
-        timeout=660,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Microsoft Word 更新设计说明书目录失败：{result.stderr.strip() or result.stdout.strip()}")
+def refresh_toc_with_layout(path: Path) -> bool:
+    """Cache chapter page numbers using headless LibreOffice, without opening Word."""
+    if not shutil.which("soffice"):
+        return False
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return False
+    with tempfile.TemporaryDirectory(prefix="design-toc-") as temp_name:
+        temp = Path(temp_name)
+        copy = temp / path.name
+        shutil.copy2(path, copy)
+        try:
+            subprocess.run(
+                ["soffice", f"-env:UserInstallation={(temp / 'profile').as_uri()}",
+                 "--headless", "--convert-to", "pdf", "--outdir", str(temp), str(copy)],
+                check=True, capture_output=True, text=True, timeout=90,
+            )
+            pages = PdfReader(copy.with_suffix(".pdf")).pages
+            document = Document(path)
+            headings = [paragraph.text for paragraph in document.paragraphs if paragraph.style.name == "Heading 1"]
+            found: dict[str, int] = {}
+            for physical_index, page in enumerate(pages):
+                if physical_index < 2:
+                    continue
+                lines = (page.extract_text() or "").splitlines()
+                for index, title in enumerate(headings, start=1):
+                    number = str(index)
+                    if title not in found and any(re.match(rf"^\s*{number}\s+\S", line) for line in lines):
+                        found[title] = physical_index - 1
+            if len(found) != len(headings):
+                return False
+            toc = next(child for child in document._element.body if child.tag == qn("w:sdt"))
+            content = toc.find(qn("w:sdtContent"))
+            for paragraph in content:
+                if paragraph.tag != qn("w:p"):
+                    continue
+                texts = paragraph.findall(".//" + qn("w:t"))
+                title = next((name for name in headings if any(node.text == name for node in texts)), None)
+                if title is not None:
+                    texts[-1].text = str(found[title])
+            document.save(path)
+            return True
+        except (OSError, subprocess.SubprocessError, ValueError, StopIteration):
+            return False
 
 
 def rebuild_toc_cache(document: Any) -> None:
@@ -311,7 +291,7 @@ def rebuild_toc_cache(document: Any) -> None:
         fld = OxmlElement("w:fldChar")
         fld.set(qn("w:fldCharType"), field_type)
         if field_type == "begin":
-            fld.set(qn("w:dirty"), "true")
+            fld.set(qn("w:dirty"), "false")
         run.append(fld)
         paragraph.append(run)
 
@@ -414,10 +394,11 @@ def generate_design_docx(
     document.add_page_break()
     add_design_content(document, business)
     rebuild_toc_cache(document)
-    request_toc_refresh(document)
+    disable_toc_refresh_on_open(document)
     document.core_properties.title = f"{software_name}-{version}-软件设计说明书"
     document.save(str(output))
-    refresh_toc_in_word(output)
+    if not refresh_toc_with_layout(output):
+        print("警告：设计说明书目录页码未自动核对；请配置 soffice 与 pypdf 后重新生成")
     return draft_md, output
 
 
